@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# RLLF run artifacts (trajectories, checkpoints, Lean cache)
+runs/

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rllf"
+version = "0.1.0"
+description = "A model-agnostic process reward model for mathematical reasoning, supervised by Lean"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "torch>=2.0",
+    "sympy>=1.12",
+]
+
+[project.optional-dependencies]
+# Needed only for a real Hugging Face base model or a pretrained policy encoder.
+hf = ["transformers>=4.40"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+rllf = "train:main"
+
+[tool.setuptools.packages.find]
+include = ["rllf*"]
+
+[tool.setuptools]
+py-modules = ["train"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::UserWarning"]
