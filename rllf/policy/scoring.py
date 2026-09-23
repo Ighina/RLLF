@@ -126,6 +126,7 @@ class ProcessRewardPolicy(PolicyAdapter):
         outcome_weight: float = 0.5,
         step_calibrator: Optional[TemperatureScaler] = None,
         outcome_calibrator: Optional[TemperatureScaler] = None,
+        beam_calibrator: Optional[TemperatureScaler] = None,
         token_scoring: str = "lookahead",
         base_tokenizer: Any = None,
         batch_size: int = 32,
@@ -135,6 +136,16 @@ class ProcessRewardPolicy(PolicyAdapter):
         self.outcome_weight = outcome_weight
         self.step_calibrator = step_calibrator or TemperatureScaler()
         self.outcome_calibrator = outcome_calibrator or TemperatureScaler()
+        # A *separate* scaler from `step_calibrator`, deliberately: `step_calibrator`
+        # is fit to make `predict_step_probability` a well-calibrated classification
+        # probability (AUC/ECE), which `rerank`'s within-step argmax doesn't even need
+        # (any monotonic scaler leaves an argmax over a fixed candidate set unchanged
+        # -- see `experiments_v1.md` §7). `beam_calibrator` scales the raw step logit
+        # for `lean_constrained_beam_search`'s *additive* combination with the base
+        # model's own cumulative log-probability, where the classifier's absolute
+        # scale genuinely matters. Defaults to the identity (T=1, bias=0, i.e. the
+        # raw logit unscaled) until `fit_beam_calibration` sets a real one.
+        self.beam_calibrator = beam_calibrator or TemperatureScaler()
         # "head": use the policy's own token head (requires shared tokenization
         # with the base model).  "lookahead": score the state that each
         # candidate token would produce -- tokenizer-independent, and the only
@@ -188,6 +199,18 @@ class ProcessRewardPolicy(PolicyAdapter):
         scores = self._score_texts([state.render()])
         return float(self.outcome_calibrator.apply(scores["outcome_logit"])[0])
 
+    def predict_step_logit_for_beam(self, state: PolicyState) -> float:
+        """`f_phi(s) = logit(q_phi(s)) / tau_phi` -- `beam_calibrator.apply_logits`
+        is exactly this (a temperature+bias scaling of the raw pre-sigmoid step
+        logit; `logit(sigmoid((z-b)/T)) == (z-b)/T`, so scaling the logit
+        directly and taking a probability's logit are the same operation).
+        Used by `lean_constrained_beam_search`'s classifier intervention --
+        one scalar per completed step, added to the beam's cumulative
+        base-model log-probability, never distributed across tokens.
+        """
+        scores = self._score_texts([state.render()])
+        return float(self.beam_calibrator.apply_logits(scores["step_logit"])[0])
+
     # -- token level ------------------------------------------------------
     def score_tokens(self, state: PolicyState, token_ids: Sequence[int]) -> torch.Tensor:
         ids = list(token_ids)
@@ -223,6 +246,38 @@ class ProcessRewardPolicy(PolicyAdapter):
             state = trajectory
         scores = self._score_texts([state.render()])
         return float(self.outcome_calibrator.apply(scores["outcome_logit"])[0])
+
+
+def step_formalizability_probabilities(policy: "ProcessRewardPolicy", trajectory: Trajectory) -> List[float]:
+    """Per-step predicted formalizability probability, in generation order.
+
+    Renders each step with the exact `(question, history, current_step)`
+    state the policy was trained on (see `state.render_state`), so these
+    scores are directly comparable to the offline step AUC/accuracy in
+    `fit_report_*.json` -- this is the trained policy asked to judge output
+    it never saw during training, not a re-derivation of the training metric.
+    """
+    history: List[str] = []
+    probs = []
+    for step in trajectory.step_texts:
+        state = PolicyState(trajectory.question, list(history), step)
+        probs.append(policy.predict_step_probability(state))
+        history.append(step)
+    return probs
+
+
+def score_trajectory_formalizability(policy: "ProcessRewardPolicy", trajectory: Trajectory) -> float:
+    """Mean per-step formalizability probability across a whole trajectory.
+
+    A cheap whole-trajectory "reward" built from the same signal the policy
+    was actually trained on (unlike `score_final_answer`, which reads an
+    outcome head FaithformBench never supervises -- see `stage_fit`'s
+    ``outcome_weight=0.0``). Doubles as: (a) the per-arm formalizability
+    metric in `stage_formalizability`, and (b) the vote weight in
+    `self_consistency_weighted`.
+    """
+    probs = step_formalizability_probabilities(policy, trajectory)
+    return sum(probs) / len(probs) if probs else 0.0
 
 
 class VerifierPolicy(PolicyAdapter):
@@ -330,6 +385,7 @@ def save_policy(
     model: ProcessRewardModel,
     step_calibrator: Optional[TemperatureScaler] = None,
     outcome_calibrator: Optional[TemperatureScaler] = None,
+    beam_calibrator: Optional[TemperatureScaler] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Save the reward model together with its calibration."""
@@ -341,6 +397,11 @@ def save_policy(
     payload = {
         "step": (step_calibrator or TemperatureScaler()).to_dict(),
         "outcome": (outcome_calibrator or TemperatureScaler()).to_dict(),
+        # Identity (T=1, bias=0) until `fit_beam_calibration` sets a real one --
+        # writing it explicitly (rather than omitting the key) keeps every
+        # checkpoint's calibration.json self-describing, and an old checkpoint
+        # saved before this key existed still loads fine (see `load_policy`).
+        "beam": (beam_calibrator or TemperatureScaler()).to_dict(),
         **(extra or {}),
     }
     (directory / "calibration.json").write_text(json.dumps(payload, indent=2))
@@ -360,17 +421,21 @@ def load_policy(
     directory = Path(path)
     model = ProcessRewardModel.load(directory)
     calibration_path = directory / "calibration.json"
-    step, outcome = TemperatureScaler(), TemperatureScaler()
+    step, outcome, beam = TemperatureScaler(), TemperatureScaler(), TemperatureScaler()
     if calibration_path.exists():
         payload = json.loads(calibration_path.read_text())
         step = TemperatureScaler(**{k: v for k, v in payload.get("step", {}).items() if k in ("temperature", "bias")})
         outcome = TemperatureScaler(
             **{k: v for k, v in payload.get("outcome", {}).items() if k in ("temperature", "bias")}
         )
+        # Absent on any checkpoint saved before `beam_calibrator` existed --
+        # `.get("beam", {})` defaults those to the identity scaler, not an error.
+        beam = TemperatureScaler(**{k: v for k, v in payload.get("beam", {}).items() if k in ("temperature", "bias")})
     return ProcessRewardPolicy(
         model,
         outcome_weight=outcome_weight,
         step_calibrator=step,
+        beam_calibrator=beam,
         outcome_calibrator=outcome,
         token_scoring=token_scoring,
         base_tokenizer=base_tokenizer,

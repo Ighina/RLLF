@@ -1,5 +1,7 @@
+import pytest
 import torch
 
+from rllf.data.trajectory import Trajectory
 from rllf.generation.base_model import ScriptedBaseModel, ToyCharModel, truncate_at_boundary
 from rllf.generation.guided_decoder import (
     MODE_PLAIN,
@@ -11,10 +13,14 @@ from rllf.generation.guided_decoder import (
     VERIFY_NONE,
     VERIFY_ONLINE,
     DecodeConfig,
+    DecodeResult,
     GuidedDecoder,
     best_of_n,
+    full_trajectory_rerank,
     sample_verified_step,
+    self_consistency_weighted,
 )
+from rllf.generation.guided_decoder import _weighted_majority
 from rllf.policy.scoring import PolicyAdapter, UniformPolicy
 from rllf.protocol import STEP_TOKEN
 from rllf.verification.lean_verifier import MockStepVerifier
@@ -147,6 +153,33 @@ def test_max_steps_terminates_the_loop():
     assert len(decoder.generate("q").steps) <= 3
 
 
+def test_max_steps_none_does_not_truncate_a_trajectory_longer_than_the_old_default():
+    # The old fixed default (8) was found to zero out 19-52% of every
+    # MATH-500 arm's trajectories with an empty final answer -- `None` must
+    # not silently reproduce that at some other fixed number either.
+    script = [[GOOD]] * 10 + [["Final answer: 6"]]
+    decoder = GuidedDecoder(
+        ScriptedBaseModel({"q": script}),
+        config=DecodeConfig(mode=MODE_PLAIN, verification=VERIFY_NONE, max_steps=None),
+    )
+    result = decoder.generate("q")
+    assert len(result.steps) == 10
+    assert result.final_answer == "Final answer: 6"
+
+
+def test_max_steps_none_is_still_bounded_by_the_safety_ceiling(monkeypatch):
+    import rllf.generation.guided_decoder as guided_decoder_module
+
+    monkeypatch.setattr(guided_decoder_module, "MAX_STEPS_SAFETY_CEILING", 3)
+    decoder = GuidedDecoder(
+        ScriptedBaseModel({"q": [[GOOD]] * 100}),  # never reaches a final answer
+        config=DecodeConfig(mode=MODE_PLAIN, verification=VERIFY_NONE, max_steps=None),
+    )
+    result = decoder.generate("q")
+    assert len(result.steps) == 3
+    assert result.stats.steps_attempted == 3
+
+
 def test_stats_are_recorded_on_the_trajectory():
     decoder = GuidedDecoder(
         _script([[GOOD], ["Final answer: 6"]]),
@@ -232,6 +265,123 @@ def test_best_of_n_ranks_by_verification():
     )
     assert result.trajectory.steps[0].verified
     assert result.trajectory.metadata["best_of_n"] == 4
+
+
+def _result(answer):
+    return DecodeResult(trajectory=Trajectory(question="q", steps=[], final_answer=answer))
+
+
+def test_weighted_majority_prefers_total_weight_over_vote_count():
+    """Three weak trajectories agreeing on '5' should still lose to one
+    trajectory the policy trusts a lot, weighing in for '7' alone."""
+    samples = [_result("5"), _result("5"), _result("5"), _result("7")]
+    weights = [0.1, 0.1, 0.1, 0.9]
+    chosen, vote_weight, winner = _weighted_majority(samples, weights)
+    assert winner == "7"
+    assert chosen.trajectory.final_answer == "7"
+    assert vote_weight["5"] == pytest.approx(0.3)
+    assert vote_weight["7"] == pytest.approx(0.9)
+
+
+def test_weighted_majority_breaks_ties_by_the_most_trusted_sample():
+    samples = [_result("9"), _result("9")]
+    weights = [0.2, 0.9]
+    chosen, _, winner = _weighted_majority(samples, weights)
+    assert winner == "9"
+    assert chosen is samples[1]  # the higher-weight one, not the first
+
+
+def test_weighted_majority_with_no_answers_returns_no_winner():
+    samples = [_result(""), _result("")]
+    chosen, vote_weight, winner = _weighted_majority(samples, [0.5, 0.5])
+    assert winner is None
+    assert vote_weight == {}
+    assert chosen is samples[0]  # falls back to the first sample
+
+
+class _ConstantFormalizabilityPolicy:
+    """`predict_step_probability` always returns the same score -- isolates
+    the self-consistency plumbing from any real reward-model behaviour."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def predict_step_probability(self, state):
+        return self.value
+
+
+def test_self_consistency_weighted_records_weights_and_metadata():
+    model = _script([[GOOD], ["Final answer: 6"]])
+    result = self_consistency_weighted(
+        "q", "6", model, _ConstantFormalizabilityPolicy(0.75), n=3,
+        config=DecodeConfig(mode=MODE_PLAIN, verification=VERIFY_NONE, max_steps=3),
+        outcome_checker=default_outcome_checker(),
+    )
+    assert result.trajectory.metadata["self_consistency_n"] == 3
+    # A constant-probability policy scores every one of the (identical, since
+    # `ScriptedBaseModel` has nothing to vary here) samples at 0.75.
+    assert result.trajectory.metadata["sample_weights"] == [0.75, 0.75, 0.75]
+    assert result.trajectory.metadata["vote_weights"]["6"] == pytest.approx(2.25)
+    assert result.trajectory.metadata["winning_weight"] == pytest.approx(2.25)
+    assert result.trajectory.outcome_reward == 1.0
+
+
+class _ScriptedFullTrajectoryModel:
+    """Fixed full-solution texts + a canned segmentation for
+    `full_trajectory_rerank` -- no real generation involved, matching
+    `ScriptedBaseModel`'s role for the `<step>`-candidate decoder."""
+
+    def __init__(self, solutions, segmented):
+        self.solutions = solutions  # question -> list[str]
+        self.segmented = segmented  # solution text -> list[str] steps
+
+    def generate_full_solution(self, question, num_candidates=1, **kwargs):
+        return list(self.solutions[question])[:num_candidates]
+
+    def segment_into_steps(self, solution):
+        return list(self.segmented[solution])
+
+
+class _KeywordFormalizabilityPolicy:
+    """`predict_step_probability` is 1.0 if `target` is in the step, else 0.0."""
+
+    def __init__(self, target):
+        self.target = target
+
+    def predict_step_probability(self, state):
+        return 1.0 if self.target in state.current_step else 0.0
+
+
+def test_full_trajectory_rerank_picks_the_highest_scoring_candidate():
+    weak = "a weak solution"
+    strong = "a strong solution"
+    model = _ScriptedFullTrajectoryModel(
+        solutions={"q": [weak, strong]},
+        segmented={
+            weak: ["a weak step", "another weak step"],
+            strong: ["a plain step", "GOOD_MARK appears here"],
+        },
+    )
+    result = full_trajectory_rerank("q", None, model, _KeywordFormalizabilityPolicy("GOOD_MARK"), n=2)
+    assert result.trajectory.step_texts == ["a plain step", "GOOD_MARK appears here"]
+    # mean of [0.0, 1.0] over the winning candidate's two steps
+    assert result.trajectory.metadata["chosen_score"] == pytest.approx(0.5)
+    assert result.trajectory.metadata["n"] == 2
+    assert len(result.trajectory.metadata["all_candidates"]) == 2
+    assert result.stats.steps_attempted == 2
+
+
+def test_full_trajectory_rerank_records_the_outcome_against_the_reference():
+    solution = r"work work \boxed{6}"
+    model = _ScriptedFullTrajectoryModel(
+        solutions={"q": [solution]}, segmented={solution: ["a step"]}
+    )
+    result = full_trajectory_rerank(
+        "q", "6", model, _ConstantFormalizabilityPolicy(0.5), n=1,
+        outcome_checker=default_outcome_checker(),
+    )
+    assert result.trajectory.final_answer == solution
+    assert result.trajectory.outcome_reward == 1.0
 
 
 def test_truncate_at_boundary():

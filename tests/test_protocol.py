@@ -1,11 +1,13 @@
 from rllf.protocol import (
     FINAL_ANSWER_MARKER,
+    FINAL_TOKEN,
     STEP_TOKEN,
     build_prompt,
     contains_final_answer,
     contains_step_boundary,
     extract_final_answer,
     format_trajectory,
+    parse_numbered_steps,
     split_steps,
     strip_step_token,
 )
@@ -57,3 +59,47 @@ def test_build_prompt_includes_history_and_current_step():
     assert prompt.splitlines()[0] == "Question: q"
     assert prompt.count(STEP_TOKEN) == 2
     assert prompt.endswith("partial")
+
+
+def test_parse_numbered_steps_splits_a_plain_numbered_list():
+    text = "1. First step here.\n2. Second step here.\n3) Third, parenthesis style."
+    assert parse_numbered_steps(text) == [
+        "First step here.",
+        "Second step here.",
+        "Third, parenthesis style.",
+    ]
+
+
+def test_parse_numbered_steps_folds_wrapped_lines_into_the_step_they_continue():
+    # A model doesn't always keep one step to one line -- a continuation line
+    # belongs to the numbered step above it, not a dropped/new entry.
+    text = "1. A step that\nwraps onto a second line.\n2. A short step."
+    assert parse_numbered_steps(text) == [
+        "A step that wraps onto a second line.",
+        "A short step.",
+    ]
+
+
+def test_parse_numbered_steps_ignores_preamble_before_the_first_number():
+    text = "Here are the steps:\n\n1. Only step."
+    assert parse_numbered_steps(text) == ["Only step."]
+
+
+def test_parse_numbered_steps_empty_input():
+    assert parse_numbered_steps("") == []
+    assert parse_numbered_steps("no numbers here") == []
+
+
+def test_final_token_is_recognised_as_a_final_answer():
+    assert contains_final_answer(f"{FINAL_TOKEN} 97")
+    assert not contains_final_answer("still reasoning")
+
+
+def test_extract_final_answer_reads_a_plain_final_token():
+    assert extract_final_answer(f"{FINAL_TOKEN} 97") == "97"
+
+
+def test_extract_final_answer_prefers_boxed_over_a_final_token_wrapper():
+    # `<final> \boxed{97}` -- the more specific boxed extraction still wins,
+    # `<final>` doesn't need its own duplicate boxed-parsing logic.
+    assert extract_final_answer(f"{FINAL_TOKEN} \\boxed{{97}}") == "97"

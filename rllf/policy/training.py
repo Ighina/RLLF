@@ -306,6 +306,40 @@ def fit_calibrators(
     return step_scaler, outcome_scaler
 
 
+def fit_beam_calibration(
+    model: ProcessRewardModel,
+    examples: Sequence[StepExample],
+    config: Optional[TrainConfig] = None,
+) -> TemperatureScaler:
+    """Fit `tau_phi` (and a bias) for `lean_constrained_beam_search`'s
+    classifier intervention: `f_phi(s) = logit(q_phi(s)) / tau_phi`
+    (`ProcessRewardPolicy.predict_step_logit_for_beam`,
+    `rllf/policy/scoring.py`).
+
+    Same `TemperatureScaler.fit` machinery `fit_calibrators` already uses
+    (Platt scaling via LBFGS on masked BCE) -- but a deliberately *separate*
+    fit, on `examples` the caller should draw from a split not used for
+    `fit_calibrators`'s own step/outcome scalers. The two calibrations solve
+    different problems even though the fitting procedure is identical:
+    `step_calibrator` targets classification calibration (AUC/ECE), which
+    `rerank`'s within-step argmax doesn't even need (any monotonic scaler
+    leaves an argmax over a fixed candidate set unchanged -- see
+    `experiments_v1.md` §7); `beam_calibrator` targets getting the
+    classifier's contribution on the same *additive scale* as the base
+    model's own cumulative token log-probability, which is a real, distinct
+    concern once the two are summed across an entire beam-search trajectory
+    rather than compared only against each other.
+    """
+    config = config or TrainConfig()
+    predictions = predict(model, examples, config.batch_size, _inference_device(model, config))
+    step_logits, step_labels = [], []
+    for i, example in enumerate(examples):
+        if example.step_reward != IGNORE:
+            step_logits.append(predictions["step_logit"][i])
+            step_labels.append(example.step_reward)
+    return TemperatureScaler().fit(torch.tensor(step_logits), torch.tensor(step_labels))
+
+
 # --------------------------------------------------------------------------
 # 2. Ranking objectives
 # --------------------------------------------------------------------------

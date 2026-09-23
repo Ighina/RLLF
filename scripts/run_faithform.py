@@ -48,12 +48,14 @@ from rllf.generation.guided_decoder import (
     DecodeConfig,
     GuidedDecoder,
     self_consistency,
+    self_consistency_weighted,
 )
 from rllf.policy.model import ProcessRewardConfig, ProcessRewardModel
-from rllf.policy.scoring import load_policy, save_policy
+from rllf.policy.scoring import load_policy, save_policy, step_formalizability_probabilities
 from rllf.policy.training import (
     TrainConfig,
     evaluate_reward_model,
+    fit_beam_calibration,
     fit_calibrators,
     train_supervised,
 )
@@ -120,7 +122,7 @@ def stage_fit(args: argparse.Namespace) -> None:
               f"held out {len(held_ex):,}", flush=True)
 
         model = ProcessRewardModel(
-            ProcessRewardConfig(encoder_name=args.encoder, max_length=args.max_length, pooling="cls")
+            ProcessRewardConfig(encoder_name=args.encoder, max_length=args.max_length, pooling=args.pooling)
         )
         config = TrainConfig(
             epochs=args.epochs, batch_size=args.batch_size, learning_rate=args.learning_rate,
@@ -185,6 +187,13 @@ def stage_eval(args: argparse.Namespace) -> None:
         mode: load_policy(str(Path(args.out) / f"prm_{mode}_{args.policy_setting}"), outcome_weight=0.0)
         for mode in args.policy_modes
     }
+    # `load_policy`/`ProcessRewardModel.load` default to CPU. That's been
+    # unnoticed so far because MiniLM/ModernBERT (33-150M) score fine on CPU;
+    # a 1.7B decoder-backbone policy would not, and would silently be ~50x
+    # slower rather than error out. Move every loaded policy to the same
+    # device the base model resolved to.
+    for _policy in policies.values():
+        _policy.model.to(base_model.device)
     policy = policies[args.policy_modes[0]]
 
     common = dict(max_steps=args.max_steps, verification=VERIFY_NONE, seed=args.seed,
@@ -197,6 +206,11 @@ def stage_eval(args: argparse.Namespace) -> None:
     for mode in args.policy_modes:
         configs[f"policy_guided_{mode}"] = DecodeConfig(
             mode=MODE_RERANK, greedy=True, alpha=args.alpha, num_candidates=args.num_candidates, **common
+        )
+        # Same samples as `self_consistency`, but each one's vote is the
+        # policy's reward instead of a flat 1 -- see `self_consistency_weighted`.
+        configs[f"self_consistency_weighted_{mode}"] = DecodeConfig(
+            mode=MODE_PLAIN, greedy=False, alpha=0.0, num_candidates=1, **common
         )
     for name in (args.methods or list(configs)):
         output = Path(args.out) / f"math500_{name}.jsonl"
@@ -214,6 +228,12 @@ def stage_eval(args: argparse.Namespace) -> None:
             if name == "self_consistency":
                 result = self_consistency(problem.question, problem.reference, base_model,
                                           n=args.num_candidates, config=configs[name], outcome_checker=checker)
+            elif name.startswith("self_consistency_weighted_"):
+                weight_mode = name[len("self_consistency_weighted_"):]
+                result = self_consistency_weighted(
+                    problem.question, problem.reference, base_model, policies[weight_mode],
+                    n=args.num_candidates, config=configs[name], outcome_checker=checker,
+                )
             else:
                 result = decoder.generate(problem.question, problem.reference)
             result.trajectory.metadata.update(problem.metadata)
@@ -239,6 +259,7 @@ def stage_report(args: argparse.Namespace) -> None:
         print("no MATH-500 results yet")
         return
     order = [n for n in ("base_greedy", "random_of_k", "self_consistency",
+                         "self_consistency_weighted_verifiability", "self_consistency_weighted_agreement",
                          "policy_guided_verifiability", "policy_guided_agreement") if n in rows]
     order += [n for n in rows if n not in order]
     print("\n=== MATH-500: answer accuracy ===")
@@ -254,9 +275,114 @@ def stage_report(args: argparse.Namespace) -> None:
     (out / "math500_report.json").write_text(json.dumps(rows, indent=2))
 
 
+def stage_formalizability(args: argparse.Namespace) -> None:
+    """Score already-generated MATH-500 trajectories with a fitted policy.
+
+    Independent of answer accuracy: does a decoding method produce steps the
+    trained verifiability/agreement policy scores as more formalizable? If a
+    method matches `base_greedy` on accuracy but scores noticeably higher
+    here, that is a free win -- the same answers, more verifiable reasoning.
+    Needs no new generation; reads the `math500_*.jsonl` files `--stage eval`
+    already wrote under `--out`.
+    """
+    out = Path(args.out)
+    policy = load_policy(str(out / f"prm_{args.mode}_{args.policy_setting}"), outcome_weight=0.0)
+    # Same CPU-default gap as `stage_eval` (see the comment there): fine for
+    # MiniLM/ModernBERT, unusably slow -- and unbatched here, one step per
+    # forward pass -- for a 1.7B-parameter policy.
+    from rllf.generation.base_model import resolve_device
+    policy.model.to(resolve_device())
+    rows: Dict[str, Dict[str, float]] = {}
+    for path in sorted(out.glob("math500_*.jsonl")):
+        name = path.stem[len("math500_") :]
+        trajectories = load_trajectories(path)
+        step_probs: List[float] = []
+        traj_means: List[float] = []
+        fully = 0
+        for t in trajectories:
+            probs = step_formalizability_probabilities(policy, t)
+            if not probs:
+                continue
+            step_probs.extend(probs)
+            mean_p = sum(probs) / len(probs)
+            traj_means.append(mean_p)
+            fully += all(p > 0.5 for p in probs)
+        if not traj_means:
+            continue
+        rows[name] = {
+            "n": len(traj_means),
+            "mean_step_formalizability": sum(step_probs) / len(step_probs),
+            "step_formalizable_rate": sum(p > 0.5 for p in step_probs) / len(step_probs),
+            "fully_formalizable_rate": fully / len(traj_means),
+            "mean_trajectory_formalizability": sum(traj_means) / len(traj_means),
+        }
+    if not rows:
+        print("no MATH-500 results to score yet")
+        return
+    print(f"\n=== MATH-500: formalizability under prm_{args.mode}_{args.policy_setting} ===")
+    print(format_report(rows, ("n", "mean_step_formalizability", "step_formalizable_rate",
+                                "fully_formalizable_rate", "mean_trajectory_formalizability")))
+    (out / f"formalizability_report_{args.mode}.json").write_text(json.dumps(rows, indent=2))
+
+
+def stage_fit_beam_calibration(args: argparse.Namespace) -> None:
+    """2a of the `lean_constrained_beam_search` request: fit `tau_phi`
+    (`ProcessRewardPolicy.beam_calibrator`, `rllf/policy/scoring.py`) for the
+    classifier intervention in `rllf.generation.beam_search`.
+
+    Reads an *already-fit* checkpoint from `--stage fit` (`--out`/`--mode`/
+    `--policy-setting` locate it, same as `--stage formalizability`) and adds
+    a "beam" key to its `calibration.json` -- it does not retrain or move the
+    reward model itself.
+
+    Uses a calibration split genuinely held out from what `stage_fit` used
+    for `step_calibrator`/`outcome_calibrator`: those are fit directly on the
+    *whole* 80% held-out split (`stage_fit`'s own eval-reporting data --
+    adequate for a classification calibrator, but this is a different
+    calibration target). This stage instead splits that same held-out split
+    in half again (`--seed + 1`, so it's deterministic but distinct from the
+    original fit/held split): one half fits `tau_phi`, the other is held out
+    purely to report how the *scaled* classifier still separates
+    provable/not on data neither `tau_phi` nor the original model training
+    ever saw.
+    """
+    table, text, contaminated = prepare(args)
+    settings = label_settings(args.mode)
+    setting_name = (args.settings or [args.policy_setting])[0]
+    policy_spec = settings[setting_name]
+    examples = to_examples(build_labels(table, policy_spec), text, exclude_problems=contaminated)
+    _, held_ex = split_examples(examples, eval_fraction=0.80, seed=args.seed)
+    calib_ex, report_ex = split_examples(held_ex, eval_fraction=0.50, seed=args.seed + 1)
+    print(f"beam calibration for prm_{args.mode}_{setting_name}: "
+          f"{len(calib_ex)} states to fit tau_phi, {len(report_ex)} held out to report on", flush=True)
+
+    checkpoint_dir = Path(args.out) / f"prm_{args.mode}_{setting_name}"
+    model = ProcessRewardModel.load(checkpoint_dir)
+    train_config = TrainConfig(batch_size=args.batch_size, device=args.device)
+    beam_scaler = fit_beam_calibration(model, calib_ex, train_config)
+
+    # A temperature+bias scaling is monotonic, so it cannot change this
+    # split's AUC -- printed only as a sanity check that the report split
+    # still discriminates at all (i.e. the checkpoint and split are sound),
+    # not as evidence about tau_phi's quality specifically.
+    report_metrics = evaluate_reward_model(model, report_ex, train_config)["step"]
+    print(f"  tau_phi={beam_scaler.temperature:.3f} bias={beam_scaler.bias:.3f} "
+          f"(report-split AUC {report_metrics['auc']:.3f}, n={report_metrics['n']:.0f})", flush=True)
+
+    calibration_path = checkpoint_dir / "calibration.json"
+    payload = json.loads(calibration_path.read_text()) if calibration_path.exists() else {}
+    payload["beam"] = beam_scaler.to_dict()
+    calibration_path.write_text(json.dumps(payload, indent=2))
+    print(f"  wrote beam calibration into {calibration_path}/calibration.json", flush=True)
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--stage", choices=["fit", "eval", "report"], default="fit")
+    p.add_argument(
+        "--stage",
+        choices=["fit", "eval", "report", "formalizability", "fit-beam-calibration"],
+        default="fit",
+    )
     p.add_argument("--out", default="runs/ff")
     p.add_argument("--data-root", default="~/Downloads/45134_FaithformBench_Benchmark_Code And Data Supplement 3")
     p.add_argument("--seed", type=int, default=0)
@@ -265,6 +391,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="verifiability = setting A (unperturbed only); agreement = setting B "
                         "(keep only verdicts matching the known ground truth)")
     p.add_argument("--encoder", default="bert-base-uncased")
+    p.add_argument("--pooling", default="cls", choices=["cls", "mean", "last"],
+                   help="'cls' (position 0) is meaningless for a causal decoder backbone "
+                        "(nothing after it is visible under causal masking) -- use 'last' there")
     p.add_argument("--max-length", type=int, default=384)
     p.add_argument("--epochs", type=int, default=8)
     p.add_argument("--batch-size", type=int, default=16)
@@ -278,7 +407,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--policy-setting", default="all8_majority")
     p.add_argument("--max-new-tokens", type=int, default=72)
     p.add_argument("--temperature", type=float, default=0.8)
-    p.add_argument("--max-steps", type=int, default=6)
+    p.add_argument("--max-steps", type=int, default=None,
+                   help="None = no artificial cap (bounded only by "
+                        "MAX_STEPS_SAFETY_CEILING and the model reaching a final "
+                        "answer). The old fixed default (6) zeroed out 19-52%% of "
+                        "trajectories per arm with an empty final answer, at a "
+                        "rate that differed systematically by arm -- pass an "
+                        "explicit value to reproduce the old fixed-budget behaviour.")
     p.add_argument("--num-candidates", type=int, default=4)
     p.add_argument("--alpha", type=float, default=1.0)
     p.add_argument("--max-test", type=int)
@@ -289,7 +424,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--restart", action="store_true")
     args = p.parse_args(argv)
     Path(args.out).mkdir(parents=True, exist_ok=True)
-    {"fit": stage_fit, "eval": stage_eval, "report": stage_report}[args.stage](args)
+    {"fit": stage_fit, "eval": stage_eval, "report": stage_report,
+     "formalizability": stage_formalizability,
+     "fit-beam-calibration": stage_fit_beam_calibration}[args.stage](args)
     return 0
 
 

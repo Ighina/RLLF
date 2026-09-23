@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from ..protocol import STEP_TOKEN, build_prompt
+from ..protocol import STEP_TOKEN, build_prompt, parse_numbered_steps
 
 
 class BaseModelAdapter:
@@ -54,6 +54,48 @@ class BaseModelAdapter:
         """Sample `num_candidates` complete next steps, `<step>` stripped."""
         raise NotImplementedError
 
+    def generate_full_solution(
+        self, question: str, num_candidates: int = 1, **kwargs: Any
+    ) -> List[str]:
+        """Sample `num_candidates` complete, naturally-written solutions.
+
+        No `<step>` protocol, no per-step early stop: the model reasons in
+        free prose to a natural end (EOS or `max_new_tokens`), the way
+        ProcessBench's own generator models were prompted. Used by
+        `full_trajectory_rerank` to test whether the `<step>`-token
+        generation-time boundary itself -- not just the base model's identity
+        -- explains why a classifier trained on naturally-segmented
+        FaithformBench steps transfers poorly to `rerank`'s candidates.
+        """
+        raise NotImplementedError
+
+    def segment_into_steps(self, solution: str) -> List[str]:
+        """Ask this same model to retroactively split a natural solution into
+        atomic steps -- the ProcessBench "generate freely, then segment"
+        convention, paired with `generate_full_solution`."""
+        raise NotImplementedError
+
+    def generate_step_beam(
+        self,
+        question: str,
+        history: Sequence[str],
+        num_beams: int = 4,
+        num_return_sequences: int = 4,
+        length_penalty: float = 1.0,
+        **kwargs: Any,
+    ) -> List[Any]:
+        """Beam-search `num_return_sequences` continuations of the next step,
+        stopped at the `<step>` boundary, each paired with the base model's
+        own (`length_penalty`-normalised) cumulative log-probability for the
+        tokens generated in *this* call.
+
+        Used by `rllf.generation.beam_search.lean_constrained_beam_search`:
+        real, token-level beam search for the "usual" pruning within a step,
+        with the classifier intervening only at the boundary between calls.
+        Returns `[(step_text, lm_score), ...]`.
+        """
+        raise NotImplementedError
+
 
 # --------------------------------------------------------------------------
 # Hugging Face
@@ -82,6 +124,30 @@ DEFAULT_FEW_SHOT: Tuple[Tuple[str, str], ...] = (
 #: shapes a model that has not been fine-tuned on the protocol falls back to,
 #: and the adapter normalises them all to one step (see `truncate_at_boundary`).
 DEFAULT_STOP_STRINGS: Tuple[str, ...] = (STEP_TOKEN, "\n\n")
+
+#: `generate_full_solution`'s prompt: no `<step>` instruction, no forced
+#: boundary -- the ProcessBench-style "just reason step by step in prose"
+#: instruction, matched to MATH-500's own `\boxed{...}` answer convention so
+#: the existing `contains_final_answer`/`extract_final_answer` machinery
+#: (rllf/protocol.py) reads it without any special-casing.
+DEFAULT_FREE_SYSTEM_PROMPT = (
+    "You solve maths problems by reasoning step by step in natural prose. "
+    "Show your work, then give the final answer as \\boxed{...} on its own "
+    "at the end."
+)
+
+#: `segment_into_steps`'s prompt: retroactively splits an already-written
+#: solution into atomic steps, the other half of the ProcessBench convention
+#: (generate freely first, segment after) -- as opposed to this codebase's
+#: own generation-time `<step>` boundary.
+DEFAULT_SEGMENTATION_PROMPT = (
+    "Split the following worked solution into a numbered list of its atomic "
+    "reasoning steps, in order. Preserve the original wording as closely as "
+    "possible -- do not add, remove, or alter any mathematical content, only "
+    "insert the step boundaries. Output ONLY the numbered list, one step per "
+    "line, formatted exactly as `1. <step text>`.\n\nSolution:\n{solution}\n\n"
+    "Numbered steps:"
+)
 
 
 def resolve_device(device: Optional[str] = None) -> str:
@@ -245,6 +311,122 @@ class HFBaseModel(BaseModelAdapter):
         prefix_len = inputs["input_ids"].shape[-1]
         texts = self._tokenizer.batch_decode(output[:, prefix_len:], skip_special_tokens=True)
         return [truncate_at_boundary(t) for t in texts]
+
+    def _free_prompt(self, question: str) -> str:
+        if self.use_chat_template:
+            messages = [
+                {"role": "system", "content": DEFAULT_FREE_SYSTEM_PROMPT},
+                {"role": "user", "content": f"Question: {question}"},
+            ]
+            return self._tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        return f"{DEFAULT_FREE_SYSTEM_PROMPT}\n\nQuestion: {question}\nSolution:"
+
+    def generate_full_solution(
+        self, question: str, num_candidates: int = 1, **kwargs: Any
+    ) -> List[str]:
+        prompt = self._free_prompt(question)
+        config = {**self.generation.__dict__, **kwargs}
+        seed = config.pop("seed", None)
+        if seed is not None:
+            self.torch.manual_seed(seed)
+        if num_candidates > 1:
+            config["do_sample"] = True
+        if not config.get("do_sample", True):
+            config.pop("temperature", None)
+            config.pop("top_p", None)
+            config.pop("top_k", None)
+        # A natural solution needs far more room than a single `<step>`-bounded
+        # step; the base `GenerationConfig.max_new_tokens` (128) is sized for
+        # `generate_step_candidates`, not this.
+        max_new_tokens = config.pop("max_new_tokens", 512)
+        # No `stop_strings`: unlike `generate_step_candidates`, nothing should
+        # cut this off early -- it must run to a natural end (EOS) so the
+        # model reasons in free prose the way ProcessBench's own generators
+        # were prompted, not the `<step>`-bounded protocol this codebase uses.
+        inputs = self._tokenizer(prompt, return_tensors="pt").to(self.device)
+        with self.torch.no_grad():
+            output = self.model.generate(
+                **inputs,
+                num_return_sequences=num_candidates,
+                pad_token_id=self._tokenizer.pad_token_id,
+                max_new_tokens=max_new_tokens,
+                **config,
+            )
+        prefix_len = inputs["input_ids"].shape[-1]
+        return self._tokenizer.batch_decode(output[:, prefix_len:], skip_special_tokens=True)
+
+    def segment_into_steps(self, solution: str) -> List[str]:
+        prompt_text = DEFAULT_SEGMENTATION_PROMPT.format(solution=solution.strip())
+        if self.use_chat_template:
+            prompt = self._tokenizer.apply_chat_template(
+                [{"role": "user", "content": prompt_text}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        else:
+            prompt = prompt_text
+        # Greedy (no sampling, via `generate()`'s temperature=0.0 sentinel)
+        # and no early-stop boundary: this is a deterministic parsing task,
+        # not creative generation, and the numbered list can legitimately
+        # contain blank lines the `<step>` protocol's stop strings would
+        # truncate at.
+        text = self.generate(prompt, temperature=0.0, max_new_tokens=1024, stop_strings=[])
+        return parse_numbered_steps(text)
+
+    def generate_step_beam(
+        self,
+        question: str,
+        history: Sequence[str],
+        num_beams: int = 4,
+        num_return_sequences: int = 4,
+        length_penalty: float = 1.0,
+        **kwargs: Any,
+    ) -> List[Any]:
+        prompt = self.render_prompt(question, history)
+        config = {**self.generation.__dict__, **kwargs}
+        seed = config.pop("seed", None)
+        if seed is not None:
+            self.torch.manual_seed(seed)
+        # Beam search is deterministic given the beams; sampling knobs from
+        # `GenerationConfig` don't apply and HF errors if `do_sample=False`
+        # (the default once `num_beams > 1`) is combined with them.
+        for key in ("do_sample", "temperature", "top_p", "top_k"):
+            config.pop(key, None)
+        max_new_tokens = config.pop("max_new_tokens", 128)
+        stop_strings = config.pop("stop_strings", self.stop_strings)
+        inputs = self._tokenizer(prompt, return_tensors="pt").to(self.device)
+        with self.torch.no_grad():
+            output = self.model.generate(
+                **inputs,
+                num_beams=num_beams,
+                num_return_sequences=num_return_sequences,
+                length_penalty=length_penalty,
+                max_new_tokens=max_new_tokens,
+                pad_token_id=self._tokenizer.pad_token_id,
+                stop_strings=list(stop_strings),
+                tokenizer=self._tokenizer,
+                output_scores=True,
+                return_dict_in_generate=True,
+                early_stopping=True,
+                **config,
+            )
+        prefix_len = inputs["input_ids"].shape[-1]
+        texts = self._tokenizer.batch_decode(output.sequences[:, prefix_len:], skip_special_tokens=True)
+        # `sequences_scores` is `sum(log p(token)) / length**length_penalty`
+        # for each returned beam -- HF's own length normalisation, exposed
+        # here as `length_penalty` rather than reimplemented (`update.md`'s
+        # beta). Not populated for every generation config in every
+        # `transformers` version; fall back to 0.0 (pure-classifier ranking)
+        # rather than crash, but this should be verified against the
+        # installed version before trusting it in a real run -- see
+        # `lean-constrained-beam-search.md`'s verification checklist.
+        if getattr(output, "sequences_scores", None) is not None:
+            scores = output.sequences_scores.float().cpu().tolist()
+        else:
+            scores = [0.0] * len(texts)
+        return list(zip([truncate_at_boundary(t) for t in texts], scores))
 
 
 def truncate_at_boundary(text: str, extra_boundaries: Sequence[str] = ("\n\n",)) -> str:

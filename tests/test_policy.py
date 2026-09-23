@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from rllf.data.dataset import build_pairs, build_step_examples
@@ -12,12 +13,15 @@ from rllf.policy.scoring import (
     combine_scores,
     load_policy,
     save_policy,
+    score_trajectory_formalizability,
     select_top_candidates,
+    step_formalizability_probabilities,
 )
 from rllf.policy.training import (
     TrainConfig,
     evaluate_pairs,
     evaluate_reward_model,
+    fit_beam_calibration,
     fit_calibrators,
     train_listwise,
     train_pairwise,
@@ -120,6 +124,75 @@ def test_calibration_improves_ece():
     assert step_scaler.temperature > 0
 
 
+def test_beam_calibrator_defaults_to_the_identity():
+    # "For now it will have a default value" -- T=1, bias=0, i.e. the raw
+    # logit unscaled, until `fit_beam_calibration` sets a real one.
+    policy = ProcessRewardPolicy(ProcessRewardModel())
+    state = PolicyState("q", [], "a state")
+    raw_logit = float(policy.model.score_texts([state.render()])["step_logit"][0])
+    assert policy.predict_step_logit_for_beam(state) == pytest.approx(raw_logit)
+
+
+def test_beam_calibrator_is_independent_of_step_calibrator():
+    # Two different scalers for two different purposes (see the comment on
+    # `ProcessRewardPolicy.beam_calibrator`) -- setting one must not move the
+    # other.
+    policy = ProcessRewardPolicy(
+        ProcessRewardModel(),
+        step_calibrator=TemperatureScaler(temperature=3.0, bias=1.0),
+        beam_calibrator=TemperatureScaler(temperature=2.0, bias=0.5),
+    )
+    state = PolicyState("q", [], "a state")
+    raw_logit = float(policy.model.score_texts([state.render()])["step_logit"][0])
+    assert policy.predict_step_logit_for_beam(state) == pytest.approx((raw_logit - 0.5) / 2.0)
+    # `predict_step_probability` still goes through `step_calibrator`, unaffected.
+    import math
+    assert policy.predict_step_probability(state) == pytest.approx(
+        1 / (1 + math.exp(-(raw_logit - 1.0) / 3.0))
+    )
+
+
+def test_beam_calibrator_round_trips_through_save_and_load(tmp_path):
+    model = ProcessRewardModel()
+    save_policy(
+        str(tmp_path), model,
+        TemperatureScaler(2.0, 0.5), TemperatureScaler(1.5, -0.2),
+        beam_calibrator=TemperatureScaler(4.0, -1.0),
+    )
+    policy = load_policy(str(tmp_path))
+    assert policy.beam_calibrator.temperature == 4.0
+    assert policy.beam_calibrator.bias == -1.0
+
+
+def test_load_policy_defaults_the_beam_calibrator_for_an_old_checkpoint(tmp_path):
+    # A checkpoint saved before `beam_calibrator` existed has no "beam" key
+    # in calibration.json -- it must still load, defaulting to the identity.
+    import json
+
+    model = ProcessRewardModel()
+    save_policy(str(tmp_path), model, TemperatureScaler(2.0, 0.5), TemperatureScaler(1.5, -0.2))
+    payload = json.loads((tmp_path / "calibration.json").read_text())
+    del payload["beam"]
+    (tmp_path / "calibration.json").write_text(json.dumps(payload))
+    policy = load_policy(str(tmp_path))
+    assert policy.beam_calibrator.temperature == 1.0
+    assert policy.beam_calibrator.bias == 0.0
+
+
+def test_fit_beam_calibration_returns_a_fitted_scaler_usable_for_beam_scoring():
+    examples = _separable_examples()
+    model = ProcessRewardModel()
+    train_supervised(model, examples, config=TrainConfig(epochs=4, batch_size=8, seed=0))
+    beam_scaler = fit_beam_calibration(model, examples)
+    assert beam_scaler.temperature > 0
+    policy = ProcessRewardPolicy(model, beam_calibrator=beam_scaler)
+    state = PolicyState("q", [], "good step")
+    raw_logit = float(model.score_texts([state.render()])["step_logit"][0])
+    assert policy.predict_step_logit_for_beam(state) == pytest.approx(
+        (raw_logit - beam_scaler.bias) / beam_scaler.temperature
+    )
+
+
 def test_temperature_scaler_is_monotone():
     scaler = TemperatureScaler(temperature=2.0, bias=0.5)
     values = scaler.apply(torch.tensor([-2.0, 0.0, 2.0]))
@@ -178,3 +251,38 @@ def test_select_top_candidates_respects_k_and_nucleus():
     logits = torch.tensor([5.0, 4.0, 1.0, 0.0])
     assert select_top_candidates(logits, k=2).tolist() == [0, 1]
     assert len(select_top_candidates(logits, k=4, top_p=0.5)) < 4
+
+
+class _HistoryLengthPolicy:
+    """`predict_step_probability` returns the length of the history it was
+    given, as a fraction of 10 -- lets a test check both the *values* scored
+    and that history accumulates in generation order, without a real model."""
+
+    def predict_step_probability(self, state):
+        return len(state.history) / 10.0
+
+
+def test_step_formalizability_probabilities_sees_the_true_prefix():
+    trajectory = Trajectory(
+        question="q", steps=[StepRecord("s0"), StepRecord("s1"), StepRecord("s2")], final_answer="a"
+    )
+    probs = step_formalizability_probabilities(_HistoryLengthPolicy(), trajectory)
+    # step 0 is scored with empty history, step 1 with one prior step, etc.
+    assert probs == [0.0, 0.1, 0.2]
+
+
+def test_step_formalizability_probabilities_empty_trajectory_is_empty():
+    trajectory = Trajectory(question="q", steps=[], final_answer="a")
+    assert step_formalizability_probabilities(_HistoryLengthPolicy(), trajectory) == []
+
+
+def test_score_trajectory_formalizability_is_the_mean_step_probability():
+    trajectory = Trajectory(
+        question="q", steps=[StepRecord("s0"), StepRecord("s1"), StepRecord("s2")], final_answer="a"
+    )
+    assert score_trajectory_formalizability(_HistoryLengthPolicy(), trajectory) == pytest.approx(0.1)
+
+
+def test_score_trajectory_formalizability_of_an_empty_trajectory_is_zero():
+    trajectory = Trajectory(question="q", steps=[], final_answer="a")
+    assert score_trajectory_formalizability(_HistoryLengthPolicy(), trajectory) == 0.0

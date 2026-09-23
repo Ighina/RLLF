@@ -139,5 +139,20 @@ def build_encoder(name: Optional[str] = None, **kwargs: Any):
     # right by default, which would drop exactly that step and score the
     # context instead; trim the older context instead, as HashingTokenizer does.
     tokenizer.truncation_side = "left"
-    encoder = AutoModel.from_pretrained(name)
+    # `ProcessRewardModel.pool`'s "last" mode (needed for a causal decoder
+    # backbone, where "cls"/position-0 pooling sees nothing under causal
+    # masking) finds the last real token via `attention_mask.sum() - 1`,
+    # which only lands on a real token if padding is on the right. Many
+    # decoder tokenizers default to left-padding (generation-oriented);
+    # force right so batched training pools the correct position regardless
+    # of the checkpoint's own default.
+    tokenizer.padding_side = "right"
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    # Some checkpoints (e.g. Qwen3) set `torch_dtype: bfloat16` in their own
+    # config and current `transformers` respects it by default, loading the
+    # encoder in bf16 while the reward heads (plain `nn.Linear`, untouched)
+    # stay fp32 -- an immediate matmul dtype-mismatch crash. Force fp32,
+    # matching how the BERT-family encoders already train here.
+    encoder = AutoModel.from_pretrained(name, torch_dtype=torch.float32)
     return encoder, tokenizer

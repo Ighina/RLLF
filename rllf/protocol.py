@@ -23,9 +23,17 @@ from typing import Iterable, List, Sequence, Tuple
 
 STEP_TOKEN = "<step>"
 FINAL_ANSWER_MARKER = "Final answer:"
+#: A second genuinely-new special token (see `segmentation_token.md`):
+#: `<step>` = "this reasoning segment is complete", `<final>` = "the whole
+#: trajectory is complete, an answer follows" -- kept semantically distinct
+#: from EOS, which `rllf/data/step_sft.py`'s fine-tuning teaches directly.
+#: `FINAL_ANSWER_MARKER` (text) stays the default convention everywhere
+#: else in this codebase; `FINAL_TOKEN` is additive, not a replacement --
+#: `contains_final_answer`/`extract_final_answer` recognise both.
+FINAL_TOKEN = "<final>"
 
 #: Tokens a tokenizer should learn as atomic units when one is extended.
-SPECIAL_TOKENS: Tuple[str, ...] = (STEP_TOKEN,)
+SPECIAL_TOKENS: Tuple[str, ...] = (STEP_TOKEN, FINAL_TOKEN)
 
 _FINAL_ANSWER_RE = re.compile(
     r"(?:final\s+answer|the\s+answer|answer)\s*(?::|=|\bis\b)\s*(.+)",
@@ -33,6 +41,7 @@ _FINAL_ANSWER_RE = re.compile(
 )
 _BOXED_RE = re.compile(r"\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
 _HASH_RE = re.compile(r"####\s*(.+)")
+_NUMBERED_LINE_RE = re.compile(r"^\s*\d+\s*[.\):]\s*(.+)$")
 
 
 def contains_step_boundary(text: str) -> bool:
@@ -45,6 +54,7 @@ def contains_final_answer(text: str) -> bool:
     lowered = text.lower()
     return (
         FINAL_ANSWER_MARKER.lower() in lowered
+        or FINAL_TOKEN in text
         or "\\boxed{" in text
         or "####" in text
     )
@@ -94,12 +104,39 @@ def extract_final_answer(text: str) -> str:
     hashed = _HASH_RE.findall(text)
     if hashed:
         return hashed[-1].strip().splitlines()[0].strip()
+    if FINAL_TOKEN in text:
+        # Plain `<final> 97` (no `\boxed`/`####` inside it, those are caught
+        # above already): take the payload right after the marker.
+        payload = text.split(FINAL_TOKEN, 1)[1].strip()
+        return payload.splitlines()[0].strip() if payload else ""
     match = _FINAL_ANSWER_RE.search(text)
     if match:
         answer = match.group(1).strip()
         return answer.splitlines()[0].strip() if answer else ""
     lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
     return lines[-1] if lines else ""
+
+
+def parse_numbered_steps(text: str) -> List[str]:
+    """Parse a model's `1. ...` / `2) ...` numbered list into flat step strings.
+
+    Used by `full_trajectory_rerank` (`rllf/generation/guided_decoder.py`) to
+    read back the *retroactive* segmentation of a naturally-written solution
+    -- the ProcessBench-style "generate freely, then split" protocol, as
+    opposed to this codebase's own `<step>`-token generation-time boundary
+    (`STEP_TOKEN` above). A numbered line's step can wrap onto following
+    unindented lines (the model doesn't always keep one step to one line);
+    those are folded into the step they continue rather than dropped or
+    mistaken for a new, unnumbered step.
+    """
+    steps: List[str] = []
+    for line in text.splitlines():
+        match = _NUMBERED_LINE_RE.match(line)
+        if match:
+            steps.append(match.group(1).strip())
+        elif steps and line.strip():
+            steps[-1] = f"{steps[-1]} {line.strip()}".strip()
+    return [s for s in steps if s]
 
 
 def build_prompt(question: str, history: Iterable[str], current_step: str = "") -> str:
