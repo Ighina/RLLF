@@ -429,6 +429,133 @@ class HFBaseModel(BaseModelAdapter):
         return list(zip([truncate_at_boundary(t) for t in texts], scores))
 
 
+class StepNativeHFBaseModel(HFBaseModel):
+    """`HFBaseModel` for a checkpoint fine-tuned by `scripts/finetune_step_native.py`.
+
+    Two things differ from the instruction-prompted base class, both of which
+    silently broke the step-native smoke test (`lean-constrained-beam-search.md`:
+    0/5 problems "reached an answer"):
+
+    * **Prompt.** The fine-tuning trained on `render_step_sft_prompt(question)`
+      followed by `step <step>\\n...` lines -- raw text, no chat template, no
+      few-shot demo. `render_prompt` reproduces that byte-for-byte.
+    * **Decoding.** `<step>`/`<final>` were added as *special* tokens, and the
+      base class decodes with `skip_special_tokens=True`, which deletes them:
+      the model's `<final> 42` came back as the bare step `42`, so
+      `contains_final_answer` never fired and every trajectory ran to
+      `max_steps`. Here only pad/EOS are stripped; `<step>` is the stop
+      boundary and `<final>` is kept in the returned text for
+      `contains_final_answer`/`extract_final_answer` (`rllf/protocol.py`).
+
+    The blank-line fallback boundary is also dropped: the model was taught the
+    token, and a `\\n\\n` inside a step is content, not a boundary.
+    """
+
+    def __init__(self, model_name_or_path: str, **kwargs: Any):
+        kwargs.setdefault("stop_strings", (STEP_TOKEN,))
+        kwargs.setdefault("few_shot", ())
+        kwargs.setdefault("use_chat_template", False)
+        super().__init__(model_name_or_path, **kwargs)
+        self._strip_tokens = {
+            t for t in (self._tokenizer.eos_token, self._tokenizer.pad_token) if t
+        }
+
+    def render_prompt(self, question: str, history: Sequence[str], current_step: str = "") -> str:
+        from ..data.step_sft import render_step_sft_prompt
+
+        continuation = "\n".join(f"{s.strip()} {STEP_TOKEN}" for s in history if s.strip())
+        if continuation:
+            continuation += "\n"
+        return f"{render_step_sft_prompt(question)}{continuation}{current_step}"
+
+    def _decode(self, token_ids: Any) -> List[str]:
+        texts = self._tokenizer.batch_decode(token_ids, skip_special_tokens=False)
+        cleaned = []
+        for text in texts:
+            for token in self._strip_tokens:
+                text = text.replace(token, "")
+            cleaned.append(text)
+        return cleaned
+
+    @staticmethod
+    def _finish_step(text: str) -> str:
+        return text.split(STEP_TOKEN)[0].strip()
+
+    def generate_step_candidates(
+        self,
+        question: str,
+        history: Sequence[str],
+        num_candidates: int = 4,
+        **kwargs: Any,
+    ) -> List[str]:
+        prompt = self.render_prompt(question, history)
+        config = {**self.generation.__dict__, **kwargs}
+        seed = config.pop("seed", None)
+        if seed is not None:
+            self.torch.manual_seed(seed)
+        if num_candidates > 1:
+            config["do_sample"] = True
+        if not config.get("do_sample", True):
+            config.pop("temperature", None)
+            config.pop("top_p", None)
+            config.pop("top_k", None)
+        stop_strings = config.pop("stop_strings", self.stop_strings)
+        inputs = self._tokenizer(prompt, return_tensors="pt").to(self.device)
+        with self.torch.no_grad():
+            output = self.model.generate(
+                **inputs,
+                num_return_sequences=num_candidates,
+                pad_token_id=self._tokenizer.pad_token_id,
+                stop_strings=list(stop_strings),
+                tokenizer=self._tokenizer,
+                **config,
+            )
+        prefix_len = inputs["input_ids"].shape[-1]
+        return [self._finish_step(t) for t in self._decode(output[:, prefix_len:])]
+
+    def generate_step_beam(
+        self,
+        question: str,
+        history: Sequence[str],
+        num_beams: int = 4,
+        num_return_sequences: int = 4,
+        length_penalty: float = 1.0,
+        **kwargs: Any,
+    ) -> List[Any]:
+        prompt = self.render_prompt(question, history)
+        config = {**self.generation.__dict__, **kwargs}
+        seed = config.pop("seed", None)
+        if seed is not None:
+            self.torch.manual_seed(seed)
+        for key in ("do_sample", "temperature", "top_p", "top_k"):
+            config.pop(key, None)
+        max_new_tokens = config.pop("max_new_tokens", 128)
+        stop_strings = config.pop("stop_strings", self.stop_strings)
+        inputs = self._tokenizer(prompt, return_tensors="pt").to(self.device)
+        with self.torch.no_grad():
+            output = self.model.generate(
+                **inputs,
+                num_beams=num_beams,
+                num_return_sequences=num_return_sequences,
+                length_penalty=length_penalty,
+                max_new_tokens=max_new_tokens,
+                pad_token_id=self._tokenizer.pad_token_id,
+                stop_strings=list(stop_strings),
+                tokenizer=self._tokenizer,
+                output_scores=True,
+                return_dict_in_generate=True,
+                early_stopping=True,
+                **config,
+            )
+        prefix_len = inputs["input_ids"].shape[-1]
+        texts = self._decode(output.sequences[:, prefix_len:])
+        if getattr(output, "sequences_scores", None) is not None:
+            scores = output.sequences_scores.float().cpu().tolist()
+        else:
+            scores = [0.0] * len(texts)
+        return list(zip([self._finish_step(t) for t in texts], scores))
+
+
 def truncate_at_boundary(text: str, extra_boundaries: Sequence[str] = ("\n\n",)) -> str:
     """Cut a sampled continuation at its first step boundary.
 

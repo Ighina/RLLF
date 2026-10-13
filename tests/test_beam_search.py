@@ -166,3 +166,35 @@ def test_stats_record_generated_tokens_and_are_attached_to_the_trajectory():
     assert result.stats.generated_tokens == len("a short step".split())
     assert result.trajectory.metadata["generated_tokens"] == result.stats.generated_tokens
     assert result.trajectory.metadata["mode"] == "lean_constrained_beam_search"
+
+
+class _ConstantBeamPolicy:
+    def __init__(self, value):
+        self.value = value
+
+    def predict_step_logit_for_beam(self, state):
+        return self.value
+
+
+class _NeverEndingModel:
+    """Every prefix offers a final answer (better LM score) and another step."""
+
+    def generate_step_beam(self, question, history, num_beams=4, num_return_sequences=4, **kwargs):
+        return [(r"\boxed{6}", -0.1), (f"step {len(history)}", -0.2)][:num_return_sequences]
+
+
+@pytest.mark.parametrize("aggregate, expect_steps", [("sum", 20), ("mean", 1)])
+def test_classifier_aggregate_controls_the_length_preference(aggregate, expect_steps):
+    # A positive per-step classifier score summed over steps lets an unfinished
+    # beam outscore every finished one, so the search never chooses to stop;
+    # averaging removes that preference and the better-LM final answer wins.
+    config = BeamSearchConfig(beam_width=2, expansion_per_beam=2, alpha=1.0, max_steps=20,
+                              classifier_aggregate=aggregate)
+    result = lean_constrained_beam_search("q", None, _NeverEndingModel(), _ConstantBeamPolicy(1.0), config=config)
+    assert len(result.trajectory.step_texts) == expect_steps
+
+
+def test_unknown_classifier_aggregate_is_rejected():
+    with pytest.raises(ValueError):
+        lean_constrained_beam_search("q", None, _NeverEndingModel(), _ConstantBeamPolicy(1.0),
+                                     config=BeamSearchConfig(classifier_aggregate="max"))

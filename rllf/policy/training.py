@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -32,6 +32,9 @@ from ..data.dataset import (
 )
 from ..data.trajectory import StepRecord, Trajectory
 from ..evaluation.metrics import binary_metrics, pairwise_ranking_accuracy
+
+if TYPE_CHECKING:  # pragma: no cover
+    from ..data.forked_tree import TrajectoryGroup
 from ..state import PolicyState
 from .model import ProcessRewardModel
 from .scoring import TemperatureScaler
@@ -364,7 +367,8 @@ def train_pairwise(
     scheduler = _make_scheduler(optimizer, max(1, len(loader) * config.epochs), config.warmup_ratio)
 
     history: Dict[str, Any] = {"train_loss": [], "eval": []}
-    for _ in range(config.epochs):
+    best = _BestCheckpoint()
+    for epoch in range(config.epochs):
         model.train()
         total, count = 0.0, 0
         for batch in loader:
@@ -379,8 +383,46 @@ def train_pairwise(
             count += 1
         history["train_loss"].append(total / max(1, count))
         if eval_pairs:
-            history["eval"].append(evaluate_pairs(model, eval_pairs, config))
+            record = evaluate_pairs(model, eval_pairs, config)
+            history["eval"].append(record)
+            # Same policy as `train_supervised`: keep the best held-out epoch.
+            # On the forked-tree data the pair loss reaches 0.06 by epoch 4
+            # while held-out pair accuracy peaks at epoch 0-1 and decays.
+            if best.update(model, record["ranking_accuracy"], epoch) and config.early_stopping_patience \
+                    and best.epochs_without_gain >= config.early_stopping_patience:
+                history["stopped_early_at_epoch"] = epoch
+                break
+    best.restore(model, history, "pair_ranking_accuracy")
     return history
+
+
+class _BestCheckpoint:
+    """Best-held-out-epoch bookkeeping shared by the ranking trainers (the
+    supervised trainer has its own inline copy). `update` returns True when
+    the epoch did *not* improve, so callers can early-stop on it."""
+
+    def __init__(self) -> None:
+        self.score = -float("inf")
+        self.state: Optional[Dict[str, torch.Tensor]] = None
+        self.epoch = -1
+        self.epochs_without_gain = 0
+
+    def update(self, model: ProcessRewardModel, score: float, epoch: int) -> bool:
+        if score > self.score:
+            self.score, self.epoch, self.epochs_without_gain = score, epoch, 0
+            self.state = {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}
+            return False
+        self.epochs_without_gain += 1
+        return True
+
+    def restore(self, model: ProcessRewardModel, history: Dict[str, Any], select_by: str) -> None:
+        if self.state is None:
+            return
+        device = next(model.parameters()).device
+        model.load_state_dict({k: v.to(device) for k, v in self.state.items()})
+        history["best_score"] = self.score
+        history["best_epoch"] = self.epoch
+        history["select_by"] = select_by
 
 
 @torch.no_grad()
@@ -411,8 +453,12 @@ def train_listwise(
     model: ProcessRewardModel,
     groups: Sequence[Sequence[StepExample]],
     config: Optional[TrainConfig] = None,
+    eval_pairs: Optional[Sequence[PairExample]] = None,
 ) -> Dict[str, Any]:
-    """Listwise ranking: softmax cross-entropy over the verified members of a group."""
+    """Listwise ranking: softmax cross-entropy over the verified members of a group.
+
+    With `eval_pairs`, held-out pairwise ranking accuracy is tracked per epoch
+    and the best epoch's weights are restored at the end."""
     config = config or TrainConfig()
     torch.manual_seed(config.seed)
     device = _resolve_device(config)
@@ -422,8 +468,9 @@ def train_listwise(
     )
     order = list(range(len(groups)))
     rng = random.Random(config.seed)
-    history: Dict[str, Any] = {"train_loss": []}
-    for _ in range(config.epochs):
+    history: Dict[str, Any] = {"train_loss": [], "eval": []}
+    best = _BestCheckpoint()
+    for epoch in range(config.epochs):
         model.train()
         rng.shuffle(order)
         total, count = 0.0, 0
@@ -452,7 +499,127 @@ def train_listwise(
             total += float(loss.detach())
             count += 1
         history["train_loss"].append(total / max(1, count))
+        if eval_pairs:
+            record = evaluate_pairs(model, eval_pairs, config)
+            history["eval"].append(record)
+            if best.update(model, record["ranking_accuracy"], epoch) and config.early_stopping_patience \
+                    and best.epochs_without_gain >= config.early_stopping_patience:
+                history["stopped_early_at_epoch"] = epoch
+                break
+    best.restore(model, history, "pair_ranking_accuracy")
     return history
+
+
+def train_trajectory_listwise(
+    model: ProcessRewardModel,
+    groups: Sequence["TrajectoryGroup"],
+    config: Optional[TrainConfig] = None,
+    target: str = "true_rate",
+    eval_groups: Optional[Sequence["TrajectoryGroup"]] = None,
+) -> Dict[str, Any]:
+    """Outcome-ranker objective over *whole* competing trajectories of one
+    problem (`rllf/data/forked_tree.py`'s `TrajectoryGroup`).
+
+    Each trajectory is rendered as `(question, all steps, final answer)` and
+    scored by the **outcome head**; the loss is softmax cross-entropy against
+    the group's targets normalised to a distribution -- `target="true_rate"`
+    (fraction of steps the real Lean pipeline proved) or `"correct"` (final
+    answer right). Because every softmax is over one problem's own
+    candidates, problem difficulty cancels out of the gradient by
+    construction -- the within-problem contrast `experiments_v1.md` §10.1
+    showed the one-trajectory-per-problem supervised fit never had.
+    """
+    from ..state import render
+
+    config = config or TrainConfig()
+    torch.manual_seed(config.seed)
+    device = _resolve_device(config)
+    model.to(device)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
+    )
+    scheduler = _make_scheduler(optimizer, max(1, len(groups) * config.epochs), config.warmup_ratio)
+
+    def targets_of(group: "TrajectoryGroup") -> torch.Tensor:
+        if target == "true_rate":
+            values = group.true_rates
+        elif target == "correct":
+            values = [0.0 if c is None else float(c) for c in group.correct]
+        else:
+            raise ValueError(f"unknown target {target!r}")
+        return torch.tensor(values, dtype=torch.float, device=device)
+
+    order = list(range(len(groups)))
+    rng = random.Random(config.seed)
+    history: Dict[str, Any] = {"train_loss": [], "eval": []}
+    best = _BestCheckpoint()
+    for epoch in range(config.epochs):
+        model.train()
+        rng.shuffle(order)
+        total, count = 0.0, 0
+        for index in order:
+            group = groups[index]
+            weights = targets_of(group)
+            if weights.sum() <= 0 or len(set(weights.tolist())) < 2:
+                continue
+            texts = [
+                render(t.question, t.step_texts, final_answer=t.final_answer or None)
+                for t in group.trajectories
+            ]
+            batch = model.tokenizer(
+                texts, padding=True, truncation=True, max_length=config.max_length, return_tensors="pt"
+            )
+            logits = model(batch["input_ids"].to(device), batch["attention_mask"].to(device))["outcome_logit"]
+            loss = -(torch.log_softmax(logits.flatten(), dim=-1) * (weights / weights.sum())).sum()
+            optimizer.zero_grad()
+            loss.backward()
+            if config.grad_clip:
+                nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+            optimizer.step()
+            scheduler.step()
+            total += float(loss.detach())
+            count += 1
+        history["train_loss"].append(total / max(1, count))
+        if eval_groups:
+            record = evaluate_trajectory_groups(model, eval_groups, config)
+            history["eval"].append(record)
+            if best.update(model, record["pick_true_rate"], epoch) and config.early_stopping_patience \
+                    and best.epochs_without_gain >= config.early_stopping_patience:
+                history["stopped_early_at_epoch"] = epoch
+                break
+    best.restore(model, history, "orm_pick_true_rate")
+    return history
+
+
+@torch.no_grad()
+def evaluate_trajectory_groups(
+    model: ProcessRewardModel, groups: Sequence["TrajectoryGroup"], config: Optional[TrainConfig] = None
+) -> Dict[str, float]:
+    """Top-1 pick quality of the outcome head on held-out groups: mean true
+    rate of the picked trajectory vs. the group mean (random) and max (oracle)."""
+    from ..state import render
+
+    config = config or TrainConfig()
+    device = _inference_device(model, config)
+    model.eval()
+    picked, random_, oracle, picked_correct = [], [], [], []
+    for group in groups:
+        texts = [render(t.question, t.step_texts, final_answer=t.final_answer or None) for t in group.trajectories]
+        batch = model.tokenizer(texts, padding=True, truncation=True, max_length=config.max_length, return_tensors="pt")
+        logits = model(batch["input_ids"].to(device), batch["attention_mask"].to(device))["outcome_logit"].flatten()
+        best = int(torch.argmax(logits))
+        picked.append(group.true_rates[best])
+        random_.append(sum(group.true_rates) / len(group.true_rates))
+        oracle.append(max(group.true_rates))
+        picked_correct.append(0.0 if group.correct[best] is None else float(group.correct[best]))
+    n = max(1, len(groups))
+    return {
+        "n_groups": float(len(groups)),
+        "pick_true_rate": sum(picked) / n,
+        "random_true_rate": sum(random_) / n,
+        "oracle_true_rate": sum(oracle) / n,
+        "pick_correct_rate": sum(picked_correct) / n,
+    }
 
 
 # --------------------------------------------------------------------------

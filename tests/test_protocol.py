@@ -103,3 +103,14 @@ def test_extract_final_answer_prefers_boxed_over_a_final_token_wrapper():
     # `<final> \boxed{97}` -- the more specific boxed extraction still wins,
     # `<final>` doesn't need its own duplicate boxed-parsing logic.
     assert extract_final_answer(f"{FINAL_TOKEN} \\boxed{{97}}") == "97"
+
+
+def test_extract_boxed_handles_nested_braces():
+    from rllf.protocol import extract_boxed
+
+    text = r"so \[\frac{1}{\tan(-60^\circ)} = \boxed{-\frac{\sqrt{3}}{3}}.\] and \boxed{2,4}"
+    assert extract_boxed(text) == [r"-\frac{\sqrt{3}}{3}", "2,4"]
+    assert extract_final_answer(text) == "2,4"
+    assert extract_final_answer(r"answer \boxed{\frac{\sqrt{3}}{3}}") == r"\frac{\sqrt{3}}{3}"
+    assert extract_boxed(r"unterminated \boxed{\frac{1}{2}") == []
+    assert extract_boxed("no box") == []

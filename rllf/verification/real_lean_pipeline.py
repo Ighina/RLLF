@@ -68,7 +68,16 @@ _LEAN4_CODE_RE = re.compile(r"```lean4\n(.*?)\n```", re.DOTALL)
 # formalizes) has its own `:=` long before the real one. Anchor on `:= by`
 # instead -- the actual proof-opening idiom every candidate we've seen uses,
 # and never what a `let` binding is followed by.
-_THEOREM_RE = re.compile(r"theorem\s+(\w+)\s*:\s*(.*?)\s*:=\s*by\b", re.DOTALL)
+#
+# Group 2 is everything between the name and `:= by`: explicit binders
+# (`(A B C : ℝ) (h : A + B + C = π)`) *and* the `: body`. An earlier version
+# required `:` immediately after the name, which silently rejected every
+# statement with binders as "no parseable theorem" -- i.e. exactly the steps
+# that mention variables or hypotheses, while binder-free concrete arithmetic
+# passed. That was 10-17% of steps in every real-Lean cache before the
+# forked-tree run (where a triangle-angle problem hit 127/127) and biased the
+# proved rate against symbolic/contextual steps.
+_THEOREM_RE = re.compile(r"theorem\s+(\w+)\b(.*?)\s*:=\s*by\b", re.DOTALL)
 
 
 @dataclass
@@ -95,6 +104,8 @@ class GoedelFormalizer:
     """
 
     MODEL_DIR = "Goedel-LM/Goedel-Formalizer-V2-8B"
+    MAX_MODEL_LEN = 16384
+    MIN_OUTPUT_TOKENS = 512  # a prompt leaving less room than this is not formalized
 
     def __init__(self, tensor_parallel_size: int = 1, gpu_memory_utilization: float = 0.15):
         from transformers import AutoTokenizer
@@ -105,7 +116,9 @@ class GoedelFormalizer:
             self.MODEL_DIR,
             tensor_parallel_size=tensor_parallel_size,
             gpu_memory_utilization=gpu_memory_utilization,
-            max_model_len=8192,  # statements only, no proof search -- short output
+            # statements only, no proof search -- but the step-level rendering lists every
+            # previous step, so deep steps of long trajectories exceed 8192 prompt tokens.
+            max_model_len=self.MAX_MODEL_LEN,
         )
         self.sampling_params = SamplingParams(temperature=0.9, top_p=0.95, top_k=20, max_tokens=4096)
 
@@ -127,19 +140,54 @@ class GoedelFormalizer:
     def formalize_batch(self, items: Sequence[Tuple[str, str]]) -> List[Optional[str]]:
         """`items`: `(theorem_name, informal_statement)` pairs -> Lean statement or None."""
         prompts = [self._prompt(name, statement) for name, statement in items]
-        outputs = self.model.generate(prompts, self.sampling_params)
-        return [self._extract(out.outputs[0].text) for out in outputs]
+        limit = self.MAX_MODEL_LEN - self.MIN_OUTPUT_TOKENS
+        fits = [len(self.tokenizer(p, add_special_tokens=False).input_ids) <= limit for p in prompts]
+        outputs = iter(self.model.generate([p for p, ok in zip(prompts, fits) if ok], self.sampling_params)
+                       if any(fits) else [])
+        # Over-long prompts count as a formalize-stage failure instead of crashing the batch.
+        return [self._extract(next(outputs).outputs[0].text) if ok else None for ok in fits]
 
 
-def render_step_claim(question: str, previous_steps: Sequence[str], step: str) -> str:
-    """Phrase one reasoning step as a claim to formalize, with just enough
-    context (problem + prior steps) for the formalizer to resolve variables
-    the step references but doesn't (re)define."""
-    parts = [f"Problem: {question}"]
+CLAIM_STYLE_FACTS = "facts"
+CLAIM_STYLE_LEGACY = "legacy"
+
+
+def render_step_claim(
+    question: str, previous_steps: Sequence[str], step: str, style: str = CLAIM_STYLE_FACTS
+) -> str:
+    """Phrase one reasoning step as the claim to formalize.
+
+    `style="facts"` (default): the previous steps as numbered hypotheses,
+    then `Statement to formalize: <step>` -- and **no problem text**. The
+    original (`style="legacy"`) rendering led with `Problem: …`, and Goedel's
+    fixed prompt ("autoformalize the following natural language problem
+    statement") took that literally: for most steps it returned the
+    *problem* or its answer -- "Definition: cot θ = cos θ / sin θ" became
+    `Real.cot (-π/3) = -√3/3`; 33-38% of steps in every earlier cache share a
+    verbatim Lean conclusion with another step of the same problem
+    (`experiments_v1.md` §9.2). Probed on 37 steps × 6 renderings
+    (`forked-tree-classifier-retraining.md` §7.2): every rendering that kept
+    the problem text, however de-emphasised, still fell back to it on a
+    fraction of steps; dropping it gave step-level statements throughout
+    (`(a13 = 1 ∧ a33 = 1)`, `R (R l) = l`, `θ₁ = π/70 ∧ θ₂ = π/54`). Variables
+    the step relies on are, in practice, introduced by the previous steps
+    (the generators restate them); `question` is kept in the signature for
+    the legacy style and for callers' bookkeeping.
+    """
+    if style == CLAIM_STYLE_LEGACY:
+        parts = [f"Problem: {question}"]
+        if previous_steps:
+            parts.append("Previous steps (context, assume correct):")
+            parts.extend(f"  {i}. {s}" for i, s in enumerate(previous_steps))
+        parts.append(f"Step to verify: {step}")
+        return "\n".join(parts)
+    if style != CLAIM_STYLE_FACTS:
+        raise ValueError(f"unknown claim style {style!r}")
+    parts = []
     if previous_steps:
-        parts.append("Previous steps (context, assume correct):")
-        parts.extend(f"  {i}. {s}" for i, s in enumerate(previous_steps))
-    parts.append(f"Step to verify: {step}")
+        parts.append("Facts (hypotheses, already established):")
+        parts.extend(f"  ({i + 1}) {s}" for i, s in enumerate(previous_steps))
+    parts.append(f"Statement to formalize: {step}")
     return "\n".join(parts)
 
 
@@ -186,6 +234,21 @@ def _denoise_byte_level_bpe(text: str) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+#: Mathlib's own default is 200000; Goedel's statements (and VeriForm's
+#: header) set `maxHeartbeats 0`, i.e. unbounded elaboration, which is what
+#: let failing `nlinarith`/`simp` searches run to the 300 s wall-clock timeout.
+DEFAULT_MAX_HEARTBEATS = 400000
+_HEARTBEATS_RE = re.compile(r"set_option\s+maxHeartbeats\s+0\b")
+
+
+def cap_heartbeats(code: str, max_heartbeats: Optional[int] = DEFAULT_MAX_HEARTBEATS) -> str:
+    """Replace `set_option maxHeartbeats 0` (unbounded) with a finite budget.
+    `None`/0 leaves the code untouched."""
+    if not max_heartbeats:
+        return code
+    return _HEARTBEATS_RE.sub(f"set_option maxHeartbeats {int(max_heartbeats)}", code)
+
+
 def _splice_proof(statement: str, tactic_body: str) -> Optional[str]:
     """Graft a proof onto *our* untouched statement instead of trusting the
     completing model to have faithfully restated it.
@@ -206,7 +269,11 @@ def _splice_proof(statement: str, tactic_body: str) -> Optional[str]:
     return statement[: match.end()] + tactic_body
 
 
-def _single_gpu_deepseek_prover(batch_size: int = 4) -> Any:
+def _single_gpu_deepseek_prover(
+    batch_size: int = 4,
+    lean_timeout: int = 60,
+    max_heartbeats: Optional[int] = DEFAULT_MAX_HEARTBEATS,
+) -> Any:
     """`DeepSeekProver` with `tensor_parallel_size=1` instead of the class's
     hardcoded 2 -- this box's GPUs (140GB each) don't need a 7B model split
     across two of them, and a shared job usually only holds one card free.
@@ -237,7 +304,14 @@ def _single_gpu_deepseek_prover(batch_size: int = 4) -> Any:
     prover.batch_size = batch_size
     prover.theorem_pattern = _THEOREM_RE
     prover.sampling_params = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=8000, n=batch_size)
-    prover.scheduler = Lean4ServerScheduler(max_concurrent_requests=batch_size)
+    # `timeout` is per Lean check (VeriForm's default is 300 s). With
+    # `max_concurrent_requests` candidates checked in parallel, a step whose
+    # candidates all fail costs the *slowest* candidate's full timeout -- and
+    # on the forked-tree run 78% of steps fail, at ~3 min/step. 60 s bounds
+    # that; a step-level claim that needs more than a minute of elaboration
+    # to close is not one the classifier should be learning from anyway.
+    prover.scheduler = Lean4ServerScheduler(max_concurrent_requests=batch_size, timeout=lean_timeout)
+    prover.max_heartbeats = max_heartbeats
 
     # vLLM's decode for this checkpoint leaks byte-level-BPE display form
     # instead of detokenizing (see `_denoise_byte_level_bpe`) -- every
@@ -292,7 +366,7 @@ def _single_gpu_deepseek_prover(batch_size: int = 4) -> Any:
         # Lean rejects outright ("invalid 'import' command, it must be used
         # in the beginning of the file") -- on every candidate, always.
         result_ids = self.scheduler.submit_all_request(
-            [dict(code=c, ast=False, tactics=False) for c in candidates]
+            [dict(code=cap_heartbeats(c, self.max_heartbeats), ast=False, tactics=False) for c in candidates]
         )
         results = self.scheduler.get_all_request_outputs(result_ids)
         for i, (candidate, result) in enumerate(zip(candidates, results)):
@@ -316,16 +390,26 @@ class RealFormalizabilityScorer:
         goedel_tensor_parallel_size: int = 1,
         goedel_gpu_memory_utilization: float = 0.35,
         prover_batch_size: int = 4,
+        claim_style: str = CLAIM_STYLE_FACTS,
+        lean_timeout: int = 60,
+        max_heartbeats: Optional[int] = DEFAULT_MAX_HEARTBEATS,
     ):
         patch_lean_workspace(lean_workspace)
         _ensure_veriform_on_path()
 
         self.lean_workspace = lean_workspace
+        self.claim_style = claim_style
         self.formalizer = GoedelFormalizer(
             tensor_parallel_size=goedel_tensor_parallel_size,
             gpu_memory_utilization=goedel_gpu_memory_utilization,
         )
-        self.prover = _single_gpu_deepseek_prover(batch_size=prover_batch_size)
+        self.prover = _single_gpu_deepseek_prover(
+            batch_size=prover_batch_size, lean_timeout=lean_timeout, max_heartbeats=max_heartbeats
+        )
+        self.settings = {
+            "prover_samples": prover_batch_size, "lean_timeout": lean_timeout,
+            "max_heartbeats": max_heartbeats, "claim_style": claim_style,
+        }
 
     def close(self) -> None:
         if hasattr(self.prover, "scheduler"):
@@ -337,7 +421,7 @@ class RealFormalizabilityScorer:
         """`items`: `(question, previous_steps, step)` triples, one per step
         to score -- across arms/problems in one call so the two models batch."""
         names = [f"step_{i}" for i in range(len(items))]
-        claims = [render_step_claim(q, hist, s) for q, hist, s in items]
+        claims = [render_step_claim(q, hist, s, style=self.claim_style) for q, hist, s in items]
         statements = self.formalizer.formalize_batch(list(zip(names, claims)))
 
         results: List[RealFormalizationResult] = []

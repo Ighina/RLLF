@@ -77,16 +77,27 @@ levels. Full formalizer-by-formalizer table and the "kind vs. degree" argument:
 
 ### 2.2 Does either policy improve MATH-500 answer accuracy?
 
-> **⚠ MAJOR CONFOUND, discovered after this was written — see `experiments_v1.md` §9.**
-> Every number below was measured under a `max_steps=6` cap that silently gave 19–52% of
+> **⚠ Superseded by a corrected, uncapped re-run — see `experiments_v1.md` §9.** The
+> numbers below were measured under a `max_steps=6` cap that silently gave 19–52% of
 > every arm's trajectories an empty (guaranteed-wrong) final answer, at a rate that
-> differs systematically by arm — rerank-family arms roughly twice as often as
-> `self_consistency`. **The headline "`self_consistency` wins, `rerank` doesn't help"
-> finding may be substantially explained by differential timeout rates, not (only) by
-> whole-solution voting being better.** Fixed in code (`max_steps` now defaults to
-> uncapped); not yet re-run. Read this whole subsection as provisional.
+> differed systematically by arm. The re-run confirms the confound was real: every
+> arm's true accuracy is substantially higher than shown below, and `self_consistency`'s
+> statistical edge over `base_greedy` — the most confidently-stated finding in this whole
+> report — drops to borderline (Phi-3.5-mini, p=0.049) or disappears entirely
+> (Qwen2.5-7B, p=0.121) once corrected. The one thing that **does** survive unchanged:
+> `policy_guided_verifiability` stays statistically indistinguishable from `base_greedy`
+> on both models, both before and after correction.
+>
+> **Second correction (`experiments_v1.md` §9.1):** the answer grader rejected correct
+> LaTeX answers (`\(\frac{6}{5}\)` vs `\frac65`, `76` vs `76^\circ`). Re-graded uncapped
+> accuracies: Phi-3.5-mini 0.376 / 0.432 (p=0.059) / 0.364 (p=0.780); Qwen2.5-7B
+> 0.664 / 0.696 (p=0.243) / 0.640 (p=0.451) for `base_greedy` / `self_consistency` /
+> `policy_guided_verifiability`. Ordering and conclusions unchanged; `self_consistency`'s
+> edge is now non-significant on both models.
 
-**No — on either base model, at any base-model strength tested.**
+**No — on either base model, at any base-model strength tested** (under the original,
+since-corrected measurement; see the box above and `experiments_v1.md` §9 for what
+actually holds up).
 
 | arm | Phi-3.5-mini | Qwen2.5-7B |
 | --- | --- | --- |
@@ -121,6 +132,20 @@ degenerate — 100% everywhere — a direct consequence of its near-chance AUC, 
 finding about the decoding arms.) Full tables: `experiments_v1.md` §3.
 
 ### 2.4 Real-Formalizability — the same claim, checked against real Lean, not the policy's opinion
+
+> **⚠ Superseded — the real-Lean pipeline was formalizing the *problem*, not the step
+> (`experiments_v1.md` §9.2).** Every real-Lean number in §2.4–§2.7 was produced by
+> handing Goedel `Problem: … / Previous steps: … / Step to verify: …` under a prompt that
+> asks for "the following problem statement"; for most steps it returned the problem or
+> its answer ("f(−2) = 20−6+4" → `f(−2) = 18`; "Definition: cot θ = cos θ/sin θ" →
+> `cot(−π/3) = −√3/3`). In the caches that kept statements, 33–38% of steps share a
+> verbatim Lean conclusion with another step of the same problem (a lower bound). The
+> "true formalization rate" of a trajectory was therefore largely per-problem provability
+> plus prover sampling noise — which also explains §2.7's within-problem null more simply
+> than the equation-density proxy. Unaffected: the offline AUCs (§2.1, §2.5) and all
+> accuracy numbers (§2.2). A step-level claim rendering has been found
+> (`forked-tree-classifier-retraining.md` §7.2) and the affected caches will be
+> re-labelled under it; until then treat §2.4–§2.7 as method description, not results.
 
 The result that matters: is §2.3's gap real, or is the policy just grading its own kind
 of output favorably? **The honest answer needed two corrections to get right, both
@@ -216,14 +241,72 @@ Chasing why Qwen3-1.7B's real-Lean transfer is worse than MiniLM's despite bette
 
 Full tables and the side-by-side comparisons: `experiments_v1.md` §8.
 
+### 2.7 Does natural (non-`<step>`-forced) generation fix the mechanism? Partly.
+
+`full_trajectory_rerank`: sample N=10 complete, naturally-written solutions per problem
+(no `<step>`-token forcing), retroactively segment with the same model, score each by
+mean per-step formalizability, compare the classifier's pick against the population and
+an oracle — checked against real Lean. 15 problems, 1,586 real-Lean checks.
+
+**Confirms the mechanism hypothesis on the aggregate**: natural generation formalizes at
+53.5% on average, a **+16.9 point** jump over `<step>`-token `base_greedy`'s 36.6% on the
+same base model and problems. The generation-protocol mismatch (§2.5's original
+diagnosis, and `lean-constrained-beam-search.md` §1) is real and costs a lot on its own.
+
+**But neither classifier can pick the better trajectories from a natural pool — both do
+worse than random** (MiniLM 49.1%, Qwen3-1.7B 50.8%, vs. 53.5% population mean), and an
+N-ablation shows this *worsening*, not improving, as more candidates become available.
+A more clearly negative result for the classifiers than the `<step>`-token setting
+produced (there they were flat, not below chance).
+
+**Why, measured on the cached data** (`experiments_v1.md` §10.1): not length (refuted —
+no correlation with true rate, and the classifiers prefer *shorter* trajectories), not
+rounding (refuted — decimal equation steps prove *more*), and only partly correctness
+(the classifiers' picks are slightly more likely correct than random, and Qwen3-1.7B's
+anti-correlation survives among correct-only trajectories). The real structure is a
+Simpson's paradox: classifier score correlates positively with true rate *across*
+problems (+0.21/+0.25 — it learned problem difficulty) but negatively *within* a problem
+(−0.15/−0.18 — where selection actually happens). FaithformBench has exactly one
+trajectory per problem, so the classifier was never trained to rank competing solutions
+to the same question. And within a problem its preference is almost entirely for
+**equation-dense** trajectories (ρ +0.26 MiniLM, +0.49 Qwen3-1.7B) — a proxy for
+"formalizable" that pointed the right way on FaithformBench but the wrong way here:
+explicit equation steps are the *least* provable type in this pipeline (44%), declarative
+setup steps the *most* (67%). Choosing "formalizable-looking" steps selects the step
+type this prover proves least.
+
+**Not autoformalizer mismatch** (`experiments_v1.md` §10.2): scoring all 1,586 steps
+under ten classifiers, the Goedel-only checkpoints — trained on essentially this
+pipeline's labels — discriminate these steps *worse* against the real-Lean verdict than
+the all8 ones (step AUC MiniLM 0.528 vs 0.551; Qwen3-1.7B 0.497 vs 0.568), keep a negative
+within-problem rank correlation, and their pick gains go in opposite directions on the two
+architectures (+0.05 / −0.07, CIs spanning zero). The larger result is that *every*
+checkpoint's step-level AUC against real Lean on natural Qwen2.5-7B steps is 0.50–0.61,
+versus 0.79–0.83 offline: the FaithformBench discrimination does not transfer to this
+generator + prover for any labeler or architecture. Two weak, non-significant positives:
+the GPT-5.2-labeled (0.614) and correctness-trained agreement (0.608; 0.628 on correct
+trajectories, pick +0.04) checkpoints transfer best. Caveat: with 15 problems the
+trajectory-level pick CIs are ±0.05–0.10, so "worse than random" should be read as "no
+better than random, with step-level AUC near chance."
+
 ---
 
 ## 3. What's left
 
-**Highest priority, supersedes everything below until resolved:** re-run the MATH-500
-accuracy comparison (§2.2) with `max_steps` uncapped, to get a genuinely unconfounded
-answer to "does either policy help accuracy" — see `experiments_v1.md` §9 for the full
-finding and the fix already made in code.
+**The uncapped `max_steps` re-run (§2.2) is done** — see `experiments_v1.md` §9 for the
+full corrected numbers. Two natural follow-ups it opens rather than closes:
+- Re-run the remaining arms (`random_of_k`, `policy_guided_agreement`, the weighted
+  self-consistency variants) uncapped too — only the 3 highest-priority arms were
+  re-run so far, on cost grounds.
+- Re-check §2.3's self-reported formalizability numbers and §2.4/§2.6's real-Lean
+  comparisons uncapped — those were all measured on the same capped trajectories and
+  inherit the same confound, just not yet quantified for those specific metrics.
+
+**`full_trajectory_rerank` at scale (§2.7)**: length and autoformalizer mismatch are
+both ruled out; the open question is now sample size — 15 problems leave the sign of the
+selection effect unsettled (CIs ±0.05–0.10). Re-run on the 110-problem set with Lean
+statements stored (~65 GPU-h at n = 4); that set is also the validation gate for any
+within-problem retraining.
 
 **Finishing and confirming the corrected (difficulty-stratified) Real-Formalizability picture:**
 - Quantify formalizability vs. correctness conflation in the "proved" metric (tag each
@@ -237,6 +320,16 @@ finding and the fix already made in code.
   job time limit, not a crash — checkpointed and resumable), and redo the level-stratified
   breakdown once it lands, and for §2.3's self-reported numbers too (does the same
   easy-problems-only pattern hide in that aggregate as well?).
+- **Come back to the agreement setting with the Qwen3-1.7B encoder.** Offline, agreement
+  AUC grew with encoder size (MiniLM 0.544 → BERT-base 0.617) where verifiability did not,
+  so its near-chance result looks like a capacity limit, and the fine-tuned Qwen3-1.7B
+  encoder (0.863 on verifiability) has never been fitted in that mode. Agreement is also
+  the label that survives the benchmark's own faithfulness problem (19% of
+  false-by-construction steps are "Proved"; agreement keeps only verdicts that match the
+  known ground truth) and the checkpoint that transferred best to real Lean in §2.7.
+  Plan: fit (`--mode agreement --encoder Qwen/Qwen3-1.7B --pooling last`, all8 / AF-only /
+  LLM-only labels) → transfer test on the re-labelled step-level Lean caches → only then an
+  uncapped `policy_guided_agreement` decode. Full plan and costs: `experiments_v1.md` §11.
 - Real-Formalizability beyond 110 problems, if the result still seems worth firming up
   further, with level-balanced (not prefix-sliced) sampling this time — full 250 costs
   ~42 GPU-hours at n=16 samples/step, more than a week's shared GPU budget in one shot.

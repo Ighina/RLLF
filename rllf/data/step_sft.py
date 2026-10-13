@@ -61,6 +61,18 @@ class StepSFTExample:
     completion: str
 
 
+def render_step_sft_prompt(question: str) -> str:
+    """The exact prompt string the step-native fine-tuning trains on.
+
+    Shared with `rllf.generation.base_model.StepNativeHFBaseModel.render_prompt`
+    so decoding the fine-tuned checkpoint shows it byte-identical prefixes to
+    the ones it was trained on -- the smoke test in
+    `lean-constrained-beam-search.md` wrapped this in the chat template with a
+    `Question:` user turn instead, a prompt the model had never seen.
+    """
+    return f"{SFT_SYSTEM_PROMPT}\n\nProblem:\n{question.strip()}\n\nSolution:\n"
+
+
 def render_step_sft_example(problem_id: str, question: str, steps: Sequence[str]) -> "StepSFTExample | None":
     """One trajectory -> one (prompt, completion) SFT pair.
 
@@ -95,8 +107,9 @@ def render_step_sft_example(problem_id: str, question: str, steps: Sequence[str]
     *body, last = cleaned
     lines = [f"{s} {STEP_TOKEN}" for s in body]
     lines.append(f"{FINAL_TOKEN} {last}")
-    prompt = f"{SFT_SYSTEM_PROMPT}\n\nProblem:\n{question.strip()}\n\nSolution:\n"
-    return StepSFTExample(problem_id=problem_id, prompt=prompt, completion="\n".join(lines))
+    return StepSFTExample(
+        problem_id=problem_id, prompt=render_step_sft_prompt(question), completion="\n".join(lines)
+    )
 
 
 def split_trajectories_by_problem(

@@ -15,10 +15,9 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, List, Optional, Sequence
 
-from ..protocol import extract_final_answer
+from ..protocol import extract_boxed, extract_final_answer
 from .base import OutcomeChecker, OutcomeVerification
 
-_BOXED_RE = re.compile(r"\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
 _UNIT_WORDS = re.compile(
     r"\b(dollars?|cents?|euros?|pounds?|units?|items?|apples?|books?|pens?|hours?|"
     r"minutes?|seconds?|days?|weeks?|months?|years?|miles?|kilometers?|km|meters?|m|"
@@ -33,7 +32,7 @@ _TRAILING_NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
 def normalize_answer(answer: Any) -> str:
     """Canonical surface form used for exact matching."""
     text = str(answer).strip()
-    boxed = _BOXED_RE.findall(text)
+    boxed = extract_boxed(text)
     if boxed:
         text = boxed[-1]
     text = text.replace("$", " ").replace("%", " ").replace("\\%", " ")
@@ -187,12 +186,42 @@ class LeanOutcomeChecker(OutcomeChecker):
         )
 
 
+class MathEquivalenceChecker(OutcomeChecker):
+    """MATH-style LaTeX / unicode / plain-text equivalence
+    (`rllf.verification.math_equivalence`): `-√3/3` == `-\\frac{\\sqrt{3}}{3}`,
+    `2π/5` == `\\frac{2\\pi}{5}`, `7.5°` == `7.5^\\circ`, element-wise tuples.
+    Last rung of the default ladder -- the three above it only ever agreed on
+    numbers or byte-identical strings, which graded every mathematically
+    correct non-numeric answer of the forked-tree run as wrong."""
+
+    method = "math_equivalence"
+
+    def check(self, question: str, final_answer: str, reference: Any) -> OutcomeVerification:
+        from .math_equivalence import latex_to_sympy_text, math_equivalent
+
+        answer_text = extract_final_answer(str(final_answer))
+        expected_text = str(reference)
+        try:
+            verdict = math_equivalent(answer_text, expected_text)
+            error = None if verdict is not None else "unparseable"
+        except Exception as exc:  # pragma: no cover - sympy edge cases
+            verdict, error = None, f"{type(exc).__name__}: {exc}"
+        return OutcomeVerification(
+            correct=bool(verdict),
+            normalized_answer=latex_to_sympy_text(answer_text),
+            normalized_reference=latex_to_sympy_text(expected_text),
+            method=self.method,
+            error=error,
+        )
+
+
 class CompositeOutcomeChecker(OutcomeChecker):
     """Accepts the answer if any checker in the ladder accepts it."""
 
     def __init__(self, checkers: Optional[Sequence[OutcomeChecker]] = None):
         self.checkers: List[OutcomeChecker] = list(
-            checkers if checkers is not None else (ExactMatchChecker(), NumericChecker(), SymbolicChecker())
+            checkers if checkers is not None
+            else (ExactMatchChecker(), NumericChecker(), SymbolicChecker(), MathEquivalenceChecker())
         )
 
     def check(self, question: str, final_answer: str, reference: Any) -> OutcomeVerification:

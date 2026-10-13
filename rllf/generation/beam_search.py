@@ -115,6 +115,14 @@ class BeamSearchConfig:
     #: ranks by something instead of every beam tying at -inf.
     verify_reject_penalty: float = -50.0
     verify_accept_bonus: float = 0.0
+    #: How a beam's per-step classifier contributions combine into its score:
+    #: `"sum"` (the original design) or `"mean"` over the beam's scored steps.
+    #: With "sum", the sign of the calibrated logit becomes a length preference --
+    #: positive per-step scores make an unfinished beam outscore every finished one
+    #: (finished beams stop accumulating), so the search runs to the step ceiling;
+    #: negative ones favour the shortest solution. "mean" ranks by the average
+    #: step score, which is what the true-formalization-rate metric measures.
+    classifier_aggregate: str = "sum"
     seed: int = 0
 
 
@@ -132,18 +140,29 @@ class _Beam:
     history: List[str] = field(default_factory=list)
     lm_score: float = 0.0
     classifier_score: float = 0.0
+    #: Steps that contributed to `classifier_score` (for `classifier_aggregate="mean"`).
+    n_scored: int = 0
+    mean_aggregate: bool = False
     final_answer: str = ""
     finished: bool = False
 
     @property
     def score(self) -> float:
+        if self.mean_aggregate:
+            return self.lm_score + self.classifier_score / max(self.n_scored, 1)
         return self.lm_score + self.classifier_score
+
+    def add_step_score(self, value: float) -> None:
+        self.classifier_score += value
+        self.n_scored += 1
 
     def child(self, step_text: str, lm_score: float) -> "_Beam":
         return _Beam(
             history=[*self.history, step_text],
             lm_score=self.lm_score + lm_score,
             classifier_score=self.classifier_score,
+            n_scored=self.n_scored,
+            mean_aggregate=self.mean_aggregate,
         )
 
 
@@ -172,7 +191,9 @@ def lean_constrained_beam_search(
         config.max_steps if config.max_steps is not None else MAX_STEPS_SAFETY_CEILING
     )
 
-    beams: List[_Beam] = [_Beam()]
+    if config.classifier_aggregate not in ("sum", "mean"):
+        raise ValueError(f"unknown classifier_aggregate: {config.classifier_aggregate!r}")
+    beams: List[_Beam] = [_Beam(mean_aggregate=config.classifier_aggregate == "mean")]
     for step_index in range(effective_max_steps):
         stats.steps_attempted += 1
         active = [b for b in beams if not b.finished]
@@ -229,6 +250,7 @@ def lean_constrained_beam_search(
             "final_score": best.score,
             "final_lm_score": best.lm_score,
             "final_classifier_score": best.classifier_score,
+            "classifier_aggregate": config.classifier_aggregate,
         },
     )
     if outcome_checker is not None and reference is not None:
@@ -260,7 +282,7 @@ def _apply_intervention(
         return
     if config.intervention == INTERVENE_CLASSIFIER:
         for beam in candidates:
-            beam.classifier_score += config.alpha * _beam_logit(policy, question, beam)
+            beam.add_step_score(config.alpha * _beam_logit(policy, question, beam))
     elif config.intervention == INTERVENE_VERIFIER:
         _apply_verifier(candidates, question, verifier, config, stats)
     elif config.intervention == INTERVENE_HYBRID:
@@ -291,7 +313,7 @@ def _apply_verifier(
         results = verifier.verify_many(question, list(history), steps)
         stats.lean_calls += len(steps)
         for beam, result in zip(group, results):
-            beam.classifier_score += (
+            beam.add_step_score(
                 config.verify_accept_bonus if result.verified else config.verify_reject_penalty
             )
 
@@ -311,7 +333,7 @@ def _apply_hybrid(
         state = PolicyState(question, beam.history[:-1], beam.history[-1])
         confidence = policy.predict_step_probability(state)
         if confidence >= config.hybrid_threshold:
-            beam.classifier_score += config.alpha * policy.predict_step_logit_for_beam(state)
+            beam.add_step_score(config.alpha * policy.predict_step_logit_for_beam(state))
         else:
             unsure.append(beam)
     if unsure:

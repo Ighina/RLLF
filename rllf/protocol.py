@@ -39,8 +39,37 @@ _FINAL_ANSWER_RE = re.compile(
     r"(?:final\s+answer|the\s+answer|answer)\s*(?::|=|\bis\b)\s*(.+)",
     re.IGNORECASE | re.DOTALL,
 )
-_BOXED_RE = re.compile(r"\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
 _HASH_RE = re.compile(r"####\s*(.+)")
+
+
+def extract_boxed(text: str) -> List[str]:
+    """Every `\\boxed{...}` payload in `text`, in order, with balanced braces.
+
+    Replaces a regex that only matched one level of nesting: MATH-style
+    answers like `\\boxed{-\\frac{\\sqrt{3}}{3}}` (two levels) silently fell
+    through to the "last non-empty line" fallback, which grades a correct
+    boxed answer as wrong whenever the expression nests. An unterminated
+    `\\boxed{` is ignored.
+    """
+    out: List[str] = []
+    start = 0
+    while True:
+        index = text.find("\\boxed{", start)
+        if index < 0:
+            return out
+        depth = 0
+        for pos in range(index + len("\\boxed"), len(text)):
+            char = text[pos]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    out.append(text[index + len("\\boxed{") : pos])
+                    start = pos + 1
+                    break
+        else:
+            return out
 _NUMBERED_LINE_RE = re.compile(r"^\s*\d+\s*[.\):]\s*(.+)$")
 
 
@@ -98,7 +127,7 @@ def extract_final_answer(text: str) -> str:
     Falls back to the last non-empty line so that a caller always gets a string
     to hand to the outcome checker.
     """
-    boxed = _BOXED_RE.findall(text)
+    boxed = extract_boxed(text)
     if boxed:
         return boxed[-1].strip()
     hashed = _HASH_RE.findall(text)
