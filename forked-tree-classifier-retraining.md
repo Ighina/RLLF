@@ -1,7 +1,7 @@
 # Retraining the step classifier on forked trajectory trees
 
 Status: experiment 1 fits done (§7.4); **experiment 2 done — null on formalization and
-accuracy** (§5.1–5.3); `full_trajectory_rerank` plug-in not started (needs fresh Lean labels).
+accuracy** (§5.1–5.3); **`full_trajectory_rerank` plug-in done — null on the 15-problem cache** (§4.1).
 
 ## 1. Why
 
@@ -143,6 +143,69 @@ Then the plug-in: the best checkpoint goes into `full_trajectory_rerank` on the
 Budget: sampling ~1 GPU-h; Lean ≈ 150 × 28 unique steps ≈ 4,200 calls ≈ **65 GPU-h**
 at the observed 65 steps/GPU-h (n=16 prover samples kept for label
 comparability with every earlier number); classifier fits are minutes on MiniLM.
+
+### 4.1 Plug-in on the 15-problem cache (Oct 14) — null, and the classifier does not transfer
+
+`rerank15_real_lean.py` re-labelled the §10 cache (15 MATH-500 problems × 10 natural
+Qwen2.5-7B trajectories, retro-segmented; 1,556 unique steps) under the step-level
+`facts` rendering with the §7.2 settings (8 prover samples, 60 s, maxHeartbeats 400000):
+8.1 + 4.9 GPU-h over two gpuq jobs (the first died with the server at 588 labels; resumed
+from checkpoint), 119 steps/GPU-h, **57.6% proved**. Labels
+`full_trajectory_rerank/real_lean_facts.json` (statements and proofs stored); the Sep 24
+legacy-rendering labels stay in `real_lean.json`. Analysis `rerank15_analyse.py`
+(`logs/rerank15_analyse.log`). Each classifier picks, per problem, the trajectory with the
+highest mean step probability; random = the problem's mean over its 10 trajectories.
+
+| policy | step AUC | pick | random | oracle | pick − random [95% CI] | pick acc | rand acc | acc − random [95% CI] | within-problem ρ | ρ(score, n steps) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `forked_supervised` (§7.4) | 0.572 | 0.622 | 0.606 | 0.806 | +0.015 [−0.079, +0.106] | **0.867** | 0.753 | +0.113 [−0.027, +0.267] | −0.020 | +0.009 |
+| old `prm_verifiability_all8_majority` | **0.599** | 0.637 | 0.606 | 0.806 | +0.031 [−0.069, +0.125] | 0.733 | 0.753 | −0.020 [−0.160, +0.133] | +0.226 | −0.199 |
+| old `prm_agreement_all8_majority` | 0.546 | 0.609 | 0.606 | 0.806 | +0.003 [−0.080, +0.084] | 0.733 | 0.753 | −0.020 [−0.173, +0.140] | +0.048 | −0.110 |
+| §10's cached Qwen3-1.7B scores | — | 0.651 | 0.606 | 0.806 | +0.044 [−0.039, +0.125] | 0.733 | 0.753 | −0.020 [−0.160, +0.120] | +0.112 | −0.295 |
+
+(CIs: 5,000-sample bootstrap over problems; one problem = 0.067. The cached MiniLM scores
+of §10 reproduce the `old_verifiability` row exactly, so the scoring path is unchanged.)
+
+Reading:
+
+1. **The forked classifier does not transfer to this generator's natural steps.** Its step
+   AUC against real Lean is 0.572 here, below the old verifiability classifier's 0.599, and
+   far from the 0.692 it reaches on held-out forked trees (§7.4) or the 0.630 on exp-2's
+   step-native MATH-500 steps (§5.3). The steps it was trained on are `<step>`-delimited
+   outputs of the step-native SFT (15.8 fine steps per solution); these are natural CoT
+   trajectories retro-segmented by the old segmenter (10.6 coarser steps), from problems of
+   levels 1–3. So the §5.3 conclusion sharpens: the AUC gain is specific to the step-native
+   generator *and* the MATH-train difficulty mix, and it does not survive either shift.
+2. **No policy selects for formalization on this cache.** Every pick − random is within
+   ±0.05 with a CI straddling zero; the random → oracle gap (0.606 → 0.806) is untouched.
+   Within-problem ρ is ≈ 0 for the forked classifier and +0.23 for the old verifiability
+   one, which now also prefers *shorter* trajectories less than §10 reported (ρ with step
+   count −0.20 vs −0.29 for the cached Qwen3 scores, +0.01 for forked).
+3. **The forked pick's higher answer accuracy (0.867 vs 0.753, +1.7 problems) is not
+   significant** (CI [−0.03, +0.27]) and is not mediated by formalization: on this cache
+   picking the trajectory with the *true* highest Lean rate gives accuracy 0.733, i.e. no
+   better than random (0.753), unlike the +7 points of §5.4 on the harder MATH-train trees.
+   Correct trajectories do have a higher true rate pooled across problems (0.687 vs 0.361),
+   but within a problem only 7 of 15 vary in both, ρ = +0.25 on those.
+4. **The relabelling itself changes a third of the verdicts** (*the* caveat for reading
+   this table against §10 / §10.2): on the 1,586 steps labelled under both renderings the
+   per-step agreement is **66.6%** — 213 steps proved only under the legacy rendering,
+   317 only under `facts`; 52 of the 84 legacy formalize-stage failures (the `_THEOREM_RE`
+   binder bug, §7.2) now prove. Overall proved rate 0.510 → 0.576. Since the legacy
+   rendering formalized the *problem* for 33–38% of steps (`experiments_v1.md` §9.2), the
+   §10 pick statistics — including "worse than random" — were partly measured against the
+   wrong claims; under step-level labels every old classifier's pick gain is ≥ 0 but within
+   noise. §10's qualitative conclusion (no usable selection signal from any classifier on
+   this cache) stands under both label sets.
+
+Bottom line for the programme: on three evaluation sets — held-out forked trees (§7.4),
+step-native MATH-500 decodes (§5.3) and this natural-CoT cache — the retrained classifier
+beats the FaithformBench ones as a step judge only on the first, in-distribution one, and
+never turns into a selection gain. The next lever is not another classifier fit on the
+same 150 trees but either (a) training data from the generator and segmentation actually
+decoded (natural CoT + retro-segmentation, or step-native for both), at a size that
+supports the ranking losses, or (b) Lean in the loop (`rejection` / hybrid), which does
+not depend on the judge's out-of-distribution AUC.
 
 ## 5. Experiment 2 — constrained beam search with a boundary-trained classifier
 

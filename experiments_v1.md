@@ -937,6 +937,13 @@ settle the sign.
   is not settled. Re-run on the 110-problem set with per-step Lean statements stored
   (~65 GPU-h at n = 4), which also unblocks the failure-decomposition in §10.1's
   limitation. Any within-problem retraining (§10.1) needs this set as its validation gate.
+  *Update (Oct 14):* the 15-problem cache is re-labelled under the step-level `facts`
+  rendering (`forked-tree-classifier-retraining.md` §4.1): per-step agreement with the
+  §10 labels is only 66.6% (proved 0.510 → 0.576; 52 of the 84 formalize failures now
+  prove), every classifier's pick − random is within ±0.05 with CIs through zero, and the
+  forked-tree classifier's step AUC on these natural steps is 0.572 (old verifiability
+  0.599). The §10 / §10.2 tables above are legacy-rendering numbers; re-read them with that
+  agreement figure in mind. The 110-problem run remains the open validation gate.
 - **Re-run the formalize-stage failures of every real-Lean cache with the fixed
   `_THEOREM_RE`** (`forked-tree-classifier-retraining.md` §7.2): the old regex rejected
   every Goedel statement with binders, so 84 (§10) + 79/74 (§8.1/§8.2) + 154 (§4) + 216
