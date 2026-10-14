@@ -901,6 +901,14 @@ settle the sign.
   Qwen2.5-7B-Instruct). Neither hypothesis tested so far explains this; still open.
 - **Finish `policy_guided_agreement`** at 110-problem scale (30% done, paused at a
   16-hour job time limit), and re-run the level-stratified breakdown once it lands.
+- *Larger encoder on the forked trees — done (Oct 15, `forked-tree-classifier-retraining.md`
+  §8):* Qwen3-1.7B lifts the forked classifier's real-Lean step AUC to 0.72 on the
+  generator's MATH-500 steps and 0.65 on the natural-CoT cache (MiniLM 0.63 / 0.57, old
+  verifiability 0.64 / 0.60) — capacity was the judge's limit — but constrained beam search
+  with it is null on accuracy (0.627 vs 0.655 search-only) and +2–3 points formalization
+  (only the proved-step count significant), and its rerank pick is more formalizable yet
+  less often correct. Judge quality is no longer the bottleneck; the intervention strength
+  (α / `tau_phi`) and the easy problem set are.
 - **Revisit the agreement setting (mode B) with a larger encoder.** Parked while the
   forked-tree retraining runs, but worth returning to: (a) offline, agreement AUC rose
   with encoder size where verifiability did not — MiniLM-L6 0.544 → BERT-base 0.617 (§1),

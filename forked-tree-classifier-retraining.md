@@ -1,7 +1,9 @@
 # Retraining the step classifier on forked trajectory trees
 
 Status: experiment 1 fits done (§7.4); **experiment 2 done — null on formalization and
-accuracy** (§5.1–5.3); **`full_trajectory_rerank` plug-in done — null on the 15-problem cache** (§4.1).
+accuracy** (§5.1–5.3); **`full_trajectory_rerank` plug-in done — null on the 15-problem cache** (§4.1); **Qwen3-1.7B
+encoder refit done (§8) — a much better step judge (AUC 0.72 OOD), still no accuracy or
+significant formalization gain.**
 
 ## 1. Why
 
@@ -346,6 +348,132 @@ points of accuracy in reranking on this data (single split, no significance test
 experiments above fail to get that because the learned judge reaches only AUC ~0.63 on new
 problems (§5.3), not because the target is useless.
 
+## 8. Capacity: refitting the forked classifier with a Qwen3-1.7B encoder (Oct 14–15)
+
+Question: is the OOD step-AUC ceiling of §5.3 / §4.1 (0.57–0.63) a *capacity* limit of
+MiniLM-L6, as `experiments_v1.md` §7 found offline for FaithformBench (0.798 → 0.863 with a
+fine-tuned Qwen3-1.7B)? Same data (150 trees, 5,415 labels, by-problem 120/30 split, seed
+0), same `supervised` BCE objective, encoder `Qwen/Qwen3-1.7B` with the §7 recipe
+(last-token pooling, lr 2e-5, batch 16, max length 320, 5 epochs, patience 2, best
+held-out epoch restored). `launch_qwen3_refit.sh` chains fit → beam decode → Lean labels;
+8.9 GPU-h in one job (fit 30 min, decode 60 min, Lean 673 new unique steps at 92
+steps/GPU-h). Checkpoint `classifiers_full/forked_supervised_qwen3`; log
+`logs/qwen3_refit.log`.
+
+### 8.1 Held-out forked trees (30 problems)
+
+| policy | step AUC | sibling acc | PRM pick | ORM pick | random | oracle | PRM ρ | ORM ρ | PRM acc | random acc |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `forked_supervised_qwen3` | **0.753** | **0.680** | **0.355** | 0.301 | 0.302 | 0.422 | **+0.220** | +0.129 | 0.267 | 0.275 |
+| `forked_supervised` (MiniLM, §7.4) | 0.692 | 0.500 | 0.344 | 0.275 | 0.302 | 0.422 | +0.158 | −0.108 | 0.333 | 0.275 |
+| old `prm_verifiability_all8_majority` | 0.599 | 0.540 | 0.323 | 0.297 | 0.302 | 0.422 | +0.068 | +0.003 | 0.300 | 0.275 |
+| old `prm_agreement_all8_majority` | 0.478 | 0.460 | 0.341 | 0.334 | 0.302 | 0.422 | +0.173 | −0.005 | 0.333 | 0.275 |
+
+Held-out AUC by epoch 0.715 → 0.725 → 0.746 → 0.741 → 0.753 (still rising at epoch 4;
+a longer schedule may add a little). Capacity does matter for the step decision: +0.06 AUC
+and sibling-pair accuracy 0.50 → 0.68 (on the 25 pairs labelled on both sides). It barely
+matters for trajectory selection: PRM pick +0.011 over MiniLM (one third of a problem's
+worth), answer accuracy of the pick at random level.
+
+### 8.2 Step AUC against real Lean on every evaluation set
+
+| evaluation set (generator / segmentation / problems) | n steps | MiniLM `forked_supervised` | **Qwen3 `forked_supervised_qwen3`** | old verifiability |
+|---|---|---|---|---|
+| held-out forked trees (step-native / MATH-train 1–5) | 980 | 0.692 | **0.753** | 0.599 |
+| exp-2 beam arms, all labelled (step-native / MATH-500 1–3) | 2,547 | 0.631 | **0.720** | 0.642 |
+| – of which `beam_lm` steps (no classifier in the loop) | 1,023 | 0.605 | **0.722** | 0.579 |
+| – `beam_forked` (MiniLM's own picks) | 1,189 | 0.643 | **0.736** | 0.686 |
+| – `beam_forked_qwen3` (its own picks) | 1,021 | 0.600 | 0.667 | 0.663 |
+| §10 rerank cache (natural CoT, retro-segmented / MATH-500 1–3) | 1,556 | 0.572 | **0.654** | 0.599 |
+
+(`exp2_step_auc.py`, `rerank15_analyse.py`.) The in-distribution gain of §7.4 now
+*transfers*: on the generator's MATH-500 steps the Qwen3 classifier is +0.09 over MiniLM
+and +0.08 over the old classifier, and it is the first retrained checkpoint that beats
+the old one on the natural-CoT cache (0.654 vs 0.599). The lower AUC on its own picks
+(0.667) is the usual selection effect — those steps are the ones it already rated high.
+So the §5.3 / §4.1 ceiling was a capacity limit, not a data limit.
+
+### 8.3 Constrained beam search with it (110 problems, same settings as §5.1)
+
+`beam_forked_qwen3`: beam 4, expansion 2, α = 1, mean aggregation, `tau_phi` fitted on
+the 980 held-out tree steps (T = 8.30, b = 5.10 — a much flatter calibrated scale than
+MiniLM's T = 2.03). 60 min decode. Paired against the search-only control and the MiniLM
+arm (`exp2_analyse.py`, `exp2_lean_analyse.py`); all 110 problems fully Lean-labelled in
+all three arms (2,547 unique steps, 46.1% proved):
+
+| arm | acc | L1 | L2 | L3 | steps/sol | words/step | words/sol | final ≠ `beam_lm` | acc vs `beam_lm` (W/L, p) |
+|---|---|---|---|---|---|---|---|---|---|
+| `beam_lm` | 0.655 | 0.727 | 0.756 | 0.512 | 9.3 | 11.6 | 108 | — | — |
+| `beam_forked` (MiniLM) | 0.673 | 0.773 | 0.711 | 0.581 | 10.8 | 9.2 | 100 | 73/110 | 9/7, p = 0.80 |
+| `beam_forked_qwen3` | 0.627 | 0.727 | 0.733 | 0.465 | 9.3 | 9.0 | 84 | 88/110 | 8/11, p = 0.65 |
+
+| formalization, paired per problem | `beam_lm` | `beam_forked_qwen3` | better / worse | sign p | Wilcoxon p |
+|---|---|---|---|---|---|
+| step rate (proved / steps) | 0.526 | 0.557 | 43 / 33 | 0.30 | 0.08 |
+| word share (words in proved steps) | 0.522 | 0.543 | 43 / 40 | 0.83 | 0.22 |
+| proved steps per solution | 4.26 | 4.76 | 44 / 24 | **0.021** | **0.014** |
+| correct | 0.655 | 0.627 | 8 / 11 | 0.65 | 0.49 |
+
+vs `beam_forked` (MiniLM): step rate 0.552 → 0.557 (40/35, p = 0.64), word share 0.534 →
+0.543 (p = 0.44), proved steps 5.06 → 4.76 (p = 0.63), correct 0.673 → 0.627 (10/15,
+p = 0.42) — indistinguishable. By level vs `beam_lm` the step-rate gain is L1 0.519 →
+0.589, L2 0.556 → 0.559, L3 0.499 → 0.539; the only significant cell is level-1 proved
+steps (8/1, p = 0.04).
+
+Reading:
+
+1. **A judge at AUC 0.72 on the generator's own steps still does not move the search's
+   outcome.** It steers more than MiniLM did (changes the final answer on 80% of problems
+   vs 66%), and it shifts every formalization measure in the right direction, but only the
+   count of proved steps is significant, and that one is granularity-sensitive; the
+   word-share measure (+2 points, p = 0.22) is the honest estimate. Accuracy is 3 points
+   *below* the control (−3 problems, well inside noise), consistent with §5.4's finding
+   that on these easy problems the Lean rate carries little answer signal.
+2. **The classifier makes solutions shorter (84 words vs 108), not finer.** Unlike the
+   MiniLM arm (more, shorter steps) it keeps 9.3 steps and shortens each one. A judge that
+   rewards short concrete steps compresses the write-up; whether that is "more
+   formalizable reasoning" or "less reasoning per step" is what word share vs step rate
+   is for, and word share says the gain is small.
+3. **Why so little, given the AUC jump?** With α = 1 and mean aggregation the calibrated
+   classifier term is divided by T = 8.3, so its per-step contribution is small against
+   the LM log-probabilities; and the decision is over only 8 candidates per round, most of
+   which share a prefix, so there is little for a judge to separate. Under the same
+   calibration-by-held-out-AUC recipe, more judge quality translates into a *flatter*
+   calibration, not a stronger push. An α sweep (and/or fitting `tau_phi` on the
+   sibling pairs, as §5 originally specified) is the obvious untested knob.
+
+### 8.4 `full_trajectory_rerank` on the re-labelled 15-problem cache
+
+Same protocol as §4.1 (`rerank15_analyse.py`, `rerank15_bootstrap.py`):
+
+| policy | step AUC | pick | random | oracle | pick − random [95% CI] | pick acc | random acc | within-problem ρ |
+|---|---|---|---|---|---|---|---|---|
+| `forked_supervised_qwen3` | **0.654** | **0.683** | 0.606 | 0.806 | **+0.076 [+0.013, +0.138]** | 0.667 | 0.753 | +0.140 |
+| `forked_supervised` (MiniLM) | 0.572 | 0.622 | 0.606 | 0.806 | +0.015 [−0.079, +0.106] | 0.867 | 0.753 | −0.020 |
+| old `prm_verifiability_all8_majority` | 0.599 | 0.637 | 0.606 | 0.806 | +0.031 [−0.069, +0.125] | 0.733 | 0.753 | +0.226 |
+
+The first pick gain of any classifier on this cache whose bootstrap CI excludes zero
+(+0.076 ≈ 40% of the random → oracle gap; pick above the problem's mean on 11 of 15
+problems; `rerank15_bootstrap.py`). Unlike every earlier classifier it prefers *longer*
+trajectories (ρ with step count +0.23 vs −0.20 for the old verifiability one), so this is
+not the §10.1 length artefact in reverse. But the picked trajectory is *less* often
+correct than random (0.667 vs 0.753, −0.087 [−0.233, +0.053]), the same decoupling as in
+8.3: on these problems selecting for formalizability does not select for correctness.
+
+### 8.5 Bottom line
+
+Encoder capacity was the binding constraint on the step judge: Qwen3-1.7B on the same
+5,415 labels is the first classifier that beats the FaithformBench ones on *every* real-Lean
+evaluation set, in and out of distribution (0.65–0.75 vs 0.58–0.69). It is **not** the
+binding constraint on the decoding outcome: constrained beam search with it is null on
+accuracy and shifts formalization by ~2–3 points (significant only on the granularity-
+sensitive count), and full-trajectory rerank with it raises the picked trajectory's
+formalization without raising its correctness. Two things remain to try before concluding
+the mechanism is dead: (i) the α / `tau_phi` sweep of 8.3 point 3, since the current
+calibration shrinks a better judge into a weaker intervention; (ii) a harder problem set
+(MATH levels 4–5, where §5.4 found the Lean rate *does* predict correctness), since on
+MATH-500 levels 1–3 the ceiling itself is near zero.
+
 ## 6. Files
 
 | file | role |
@@ -360,6 +488,7 @@ problems (§5.3), not because the target is useless.
 | `scripts/train_forked_classifier.py` | experiment 1 fits + comparison table |
 | `tests/test_forked_tree.py` | 12 tests (sampler on a scripted step model, dedup, pairs, builders, listwise training, evaluation) |
 | scratchpad `forked_tree_sample.py` / `forked_tree_real_lean.py` (+ `launch_*.sh`) | the two GPU jobs; outputs under `/scratch/users/iacopog/rllf-runs/forked_tree/` |
+| `…/forked_tree/scripts/launch_qwen3_refit.sh`, `exp2_step_auc.py`, `rerank15_bootstrap.py` | §8: Qwen3-1.7B refit chain, step AUC per evaluation set, rerank bootstrap |
 
 ## 7. Results
 
