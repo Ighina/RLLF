@@ -686,6 +686,48 @@ secondary to this.
 
 ---
 
+### 9.4 Fourth correction — binder statements were never sent to the prover (re-run Oct 16)
+
+`forked-tree-classifier-retraining.md` §7.2 found that `_THEOREM_RE` required a `:` right
+after the theorem name, so every Goedel statement with explicit binders —
+`theorem step_0 (x y : ℝ) (h : x + y = 10) : …` — was rejected as "no parseable theorem
+statement" and recorded as a formalize-stage failure without ever reaching the prover.
+That is 10–17% of the steps in every cache above. All 607 such entries across the five
+legacy caches (§4's Phi arms, §8.3's Qwen2.5-7B arms, §7/§8.1's Qwen3 arms, §10's rerank
+cache) were re-run with the fixed regex under the *legacy* claim rendering (so each cache
+stays internally consistent; the §9.2 rendering change is a separate matter) and the
+current prover settings (8 samples, 60 s, maxHeartbeats 400000 — slightly stricter than
+the n=16/300 s the caches were built with). 10.8 GPU-h (`binder_rerun.py`,
+`logs/binder_rerun.json`). **None still fails at the formalize stage**; **246 of 607 (40.5%)
+prove** — a higher rate than the caches' prove-stage steps, as expected for the symbolic /
+hypothesis-carrying steps the regex was dropping.
+
+Corrected real-formalization rates (old → new; the ordering between arms is unchanged
+everywhere):
+
+| cache / arm | n | re-run | now proved | rate old → new | L1 | L2 | L3 |
+|---|---|---|---|---|---|---|---|
+| Phi-3.5 `base_greedy` (§4) | 438 | 69 | 20 | 0.372 → 0.418 | 0.54 → 0.54 | 0.38 → 0.46 | 0.30 → 0.33 |
+| Phi-3.5 `policy_guided_verifiability` (§4) | 416 | 70 | 25 | 0.365 → 0.425 | 0.63 → 0.63 | 0.39 → 0.47 | 0.24 → 0.31 |
+| Phi-3.5 `policy_guided_agreement` (§4, partial) | 144 | 15 | 8 | 0.493 → 0.549 | 0.56 → 0.58 | 0.37 → 0.49 | — |
+| Qwen2.5-7B `base_greedy` (§8.3) | 434 | 70 | 29 | 0.366 → 0.433 | 0.57 → 0.62 | 0.41 → 0.48 | 0.25 → 0.32 |
+| Qwen2.5-7B `policy_guided_verifiability` MiniLM (§8.3) | 415 | 73 | 28 | 0.366 → 0.434 | 0.65 → 0.69 | 0.39 → 0.46 | 0.23 → 0.30 |
+| Qwen2.5-7B `policy_guided_verifiability` Qwen3-1.7B (§8.3) | 422 | 73 | 22 | 0.353 → 0.405 | 0.50 → 0.53 | 0.44 → 0.51 | 0.22 → 0.27 |
+| Phi-3.5 `policy_guided_verifiability` Qwen3-1.7B (§7) | 443 | 79 | 22 | 0.330 → 0.379 | 0.60 → 0.63 | 0.36 → 0.41 | 0.21 → 0.27 |
+| Phi-3.5 `policy_guided_verifiability` Qwen3-Goedel (§8.1) | 456 | 74 | 33 | 0.362 → 0.434 | 0.54 → 0.59 | 0.41 → 0.49 | 0.26 → 0.33 |
+| §10 rerank cache, 150 trajectories (legacy labels) | 1,586 | 84 | 59 | 0.510 → 0.547 | 0.45 → 0.46 | 0.60 → 0.69 | 0.48 → 0.48 |
+
+What changes and what does not: every rate rises by 4–7 points, level 2 most (where
+steps carry variables and hypotheses). The §4 level-1 edge of `policy_guided_verifiability`
+over `base_greedy` on Phi (0.63 vs 0.54) is untouched; its level-3 deficit narrows
+(0.24/0.30 → 0.31/0.33). §7's "Qwen3-1.7B guidance is *worse* than MiniLM by the real
+measure" survives on Qwen2.5-7B (0.405 vs 0.434) and on Phi (0.379 vs the MiniLM arm's
+0.425). Every real-formalization number in §4, §7, §8 and §10 above should be read with
+this +4–7 point correction; the tables there are left as recorded, with this section as
+the erratum. (The §9.2 rendering problem is *not* corrected by this: these caches still
+formalize the problem for a third of their steps. The step-level re-labelled numbers are
+in `forked-tree-classifier-retraining.md` §4.1 and §8.)
+
 ## 10. `full_trajectory_rerank` — does natural generation actually fix the mechanism?
 
 §9's confound is one independent problem with `rerank`. A second, raised directly: the
@@ -952,7 +994,7 @@ settle the sign.
   forked-tree classifier's step AUC on these natural steps is 0.572 (old verifiability
   0.599). The §10 / §10.2 tables above are legacy-rendering numbers; re-read them with that
   agreement figure in mind. The 110-problem run remains the open validation gate.
-- **Re-run the formalize-stage failures of every real-Lean cache with the fixed
+- *Done (Oct 16, §9.4):* **Re-run the formalize-stage failures of every real-Lean cache with the fixed
   `_THEOREM_RE`** (`forked-tree-classifier-retraining.md` §7.2): the old regex rejected
   every Goedel statement with binders, so 84 (§10) + 79/74 (§8.1/§8.2) + 154 (§4) + 216
   (§8.3) "formalize" failures were never sent to the prover — ~607 steps, ~7 GPU-h. Until
