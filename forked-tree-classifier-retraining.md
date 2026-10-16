@@ -469,10 +469,38 @@ binding constraint on the decoding outcome: constrained beam search with it is n
 accuracy and shifts formalization by ~2–3 points (significant only on the granularity-
 sensitive count), and full-trajectory rerank with it raises the picked trajectory's
 formalization without raising its correctness. Two things remain to try before concluding
-the mechanism is dead: (i) the α / `tau_phi` sweep of 8.3 point 3, since the current
-calibration shrinks a better judge into a weaker intervention; (ii) a harder problem set
+the mechanism is dead: (i) the α / `tau_phi` sweep of 8.3 point 3 — *done, §8.6: it costs
+accuracy and adds no formalization*; (ii) a harder problem set
 (MATH levels 4–5, where §5.4 found the Lean rate *does* predict correctness), since on
 MATH-500 levels 1–3 the ceiling itself is near zero.
+
+### 8.6 Intervention strength — α sweep (Oct 16): pushing harder costs accuracy, buys no formalization
+
+§8.3 point 3 asked whether the Qwen3 judge's small effect was the calibration shrinking it
+(T = 8.3). `beam_decode_v2.py` on the same 110 problems and settings, α ∈ {4, 10, 30}
+(α = 4 matches the MiniLM arm's effective scale; 10 and 30 push harder); all arms
+Lean-labelled (1,077 new unique steps, 3,624 total, 14.5 GPU-h). Paired against the
+search-only control:
+
+| arm | acc | L1 | L2 | L3 | acc vs `beam_lm` (W/L, p) | step rate | word share | proved steps | words/sol | final ≠ `beam_lm` |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `beam_lm` | 0.655 | 0.727 | 0.756 | 0.512 | — | 0.526 | 0.522 | 4.26 | 108 | — |
+| `beam_forked_qwen3` (α = 1) | 0.627 | 0.727 | 0.733 | 0.465 | 8/11, p = 0.65 | 0.557 | 0.543 | 4.76 | 84 | 88/110 |
+| `beam_forked_qwen3_a4` | 0.564 | 0.727 | 0.622 | 0.419 | 8/18, **p = 0.076** (Wilcoxon 0.050) | 0.558 (p = 0.11) | 0.544 (p = 0.31) | 4.97 (p = 0.075) | 83 | 105/110 |
+| `beam_forked_qwen3_a10` | 0.582 | 0.727 | 0.578 | 0.512 | 14/22, p = 0.24 | 0.546 (p = 0.40) | 0.531 (p = 1.00) | 4.80 (p = 0.12) | 82 | 106/110 |
+| `beam_forked_qwen3_a30` | 0.555 | 0.591 | 0.556 | 0.535 | 13/24, **p = 0.099** | — | — | — | 80 | 108/110 |
+
+(α = 30 decoded for accuracy only. Sign-test p for the formalization columns is against
+`beam_lm`; a4 vs a10 differ on nothing, p ≥ 0.19.)
+
+Reading: a dose–response in the wrong direction. Every increase in α changes more final
+answers (80% → 95–98% of problems) and lowers accuracy — by 7–10 points at α ≥ 4, at the
+edge of significance on 110 problems — while formalization stays where α = 1 left it
+(step rate +2–3 points, word share +1–2, nothing significant). The judge's steering
+saturates on formalization at α ≈ 1 and then only trades correctness away. So the
+calibration was not shrinking a useful signal: the signal itself is orthogonal to (or
+mildly against) correctness on these problems, consistent with §5.4 / §8.4. Intervention
+strength is closed as a lever on MATH-500 levels 1–3.
 
 ## 6. Files
 
