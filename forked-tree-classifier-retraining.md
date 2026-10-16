@@ -502,6 +502,43 @@ calibration was not shrinking a useful signal: the signal itself is orthogonal t
 mildly against) correctness on these problems, consistent with §5.4 / §8.4. Intervention
 strength is closed as a lever on MATH-500 levels 1–3.
 
+## 9. What "not proved" means — refutation probe (Oct 16)
+
+`experiments_v1.md` §4 left open whether the real-Lean "proved" metric measures
+*formalizability* (the claim can be stated and proved) or *truth* (a false claim fails
+regardless of shape). With statements now stored for every label, `negation_probe.py`
+asked DeepSeek-Prover-V2 (same settings: 8 samples, 60 s, maxHeartbeats 400000) to prove
+the **negation** of the stored statement under its own binders and hypotheses — a
+refutation — for 100 prove-stage failures from each label set (seed 0) and 30 proved
+statements per set as a control. 4.7 GPU-h; `logs/negation_probe.json`.
+
+| label set (generator / problems) | failures probed | refuted | controls (proved statements) refuted |
+|---|---|---|---|
+| forked trees (step-native / MATH-train 1–5) | 100 | 4 | 0 / 30 |
+| exp-2 beam arms (step-native / MATH-500 1–3) | 100 | 3 | 0 / 30 |
+| rerank cache (natural CoT / MATH-500 1–3) | 100 | 0 | 0 / 30 |
+| **all** | **300** | **7 (2.3%)** | **0 / 90** |
+
+All 300 statements were negatable (parsed into binders + conclusion). The seven refutations
+are concrete computations gone wrong — `f 2 = 86` for `x⁴+5x³+9x²−x−14`, a polar-to-
+Cartesian conversion, two cross products, an algebraic-system step — closed by `norm_num`
+/ `simp` / `linarith`. 196 of the 300 failures are closed numeric claims (no binders),
+exactly the kind the prover refutes most easily when they are false, and only 4 of those
+196 were refuted.
+
+Reading: **"not proved" is search / statement failure, not demonstrated falsity.** At most
+a few percent of failing steps can be shown false by the same prover; the rest are
+either true and too hard for an 8-sample tactic search, or formalized into something the
+prover can neither prove nor refute (under-specified `let`-chains, real-analysis facts,
+geometry). The refuted share is a lower bound on falsity — the prover's refutation search
+fails for the same reasons its proof search does — but the asymmetry on closed numeric
+claims (easy to refute when false, 2% refuted) says most failing steps are not simply
+wrong arithmetic. So the metric's name should be read as *provable by this pipeline*:
+it does carry some truth signal (correct trajectories have higher step rates, §4.1 /
+§5.4), but a classifier that learns it is learning "which claims this prover closes",
+which is why selecting on it shortens and concretises steps (§8.3, §8.6) rather than
+fixing answers.
+
 ## 6. Files
 
 | file | role |
@@ -517,6 +554,7 @@ strength is closed as a lever on MATH-500 levels 1–3.
 | `tests/test_forked_tree.py` | 12 tests (sampler on a scripted step model, dedup, pairs, builders, listwise training, evaluation) |
 | scratchpad `forked_tree_sample.py` / `forked_tree_real_lean.py` (+ `launch_*.sh`) | the two GPU jobs; outputs under `/scratch/users/iacopog/rllf-runs/forked_tree/` |
 | `…/forked_tree/scripts/launch_qwen3_refit.sh`, `exp2_step_auc.py`, `rerank15_bootstrap.py` | §8: Qwen3-1.7B refit chain, step AUC per evaluation set, rerank bootstrap |
+| `…/forked_tree/scripts/beam_decode_v2.py`, `negation_probe.py`, `binder_rerun.py`, `hybrid_beam_decode.py`, `hard_forked_sample.py`, `regrade_arms.py` | §8.6 α sweep / hard set, §9 refutation probe, `experiments_v1.md` §9.4 binder re-run, Lean-in-the-loop, hard forked trees, answer re-grade |
 
 ## 7. Results
 

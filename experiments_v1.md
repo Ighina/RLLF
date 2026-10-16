@@ -934,7 +934,9 @@ settle the sign.
 
 ## 11. Open items / not yet run
 
-- **Formalizability vs. correctness**: quantify how much of "not proved" is genuine
+- *Done (Oct 16, `forked-tree-classifier-retraining.md` §9): 7 of 300 sampled failures (2.3%)
+  are refutable by the same prover, 0/90 controls — "not proved" is search/statement
+  failure, not demonstrated falsity.* **Formalizability vs. correctness**: quantify how much of "not proved" is genuine
   falsity vs. search failure — needed to know what the Real-Formalizability metric is
   actually measuring (§4).
 - **What's specifically driving Qwen3-1.7B's easy-problem transfer behavior** — §8.2 showed
