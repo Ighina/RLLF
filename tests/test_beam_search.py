@@ -198,3 +198,28 @@ def test_unknown_classifier_aggregate_is_rejected():
     with pytest.raises(ValueError):
         lean_constrained_beam_search("q", None, _NeverEndingModel(), _ConstantBeamPolicy(1.0),
                                      config=BeamSearchConfig(classifier_aggregate="max"))
+
+
+
+def test_hybrid_falls_back_to_classifier_when_verifier_declines():
+    """A verifier answering `verified=None` (budget spent) must leave the beam with the
+    classifier's contribution, not a neutral 0 and not a Lean call in the stats."""
+    from types import SimpleNamespace
+    from rllf.generation.beam_search import DecodeStats, _Beam, _apply_hybrid, BeamSearchConfig, INTERVENE_HYBRID
+
+    class Policy:
+        def predict_step_probability(self, state):
+            return 0.1  # always "unsure" -> escalated
+        def predict_step_logit_for_beam(self, state):
+            return -2.0
+
+    class Verifier:
+        def verify_many(self, question, history, steps):
+            return [SimpleNamespace(verified=None) for _ in steps]
+
+    beam = _Beam(history=["a step"])
+    stats = DecodeStats()
+    config = BeamSearchConfig(alpha=1.5, intervention=INTERVENE_HYBRID, hybrid_threshold=0.25)
+    _apply_hybrid([beam], "q", Policy(), Verifier(), config, stats)
+    assert beam.classifier_score == pytest.approx(-3.0)
+    assert stats.lean_calls == 0

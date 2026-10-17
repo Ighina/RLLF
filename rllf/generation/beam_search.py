@@ -298,8 +298,12 @@ def _beam_logit(policy: Any, question: str, beam: _Beam) -> float:
 
 def _apply_verifier(
     candidates: List[_Beam], question: str, verifier: Any,
-    config: BeamSearchConfig, stats: DecodeStats,
+    config: BeamSearchConfig, stats: DecodeStats, policy: Any = None,
 ) -> None:
+    """A verifier may answer `verified=None` for a step it declined to check
+    (e.g. a per-problem Lean budget is spent); with a `policy` given (hybrid
+    mode) that beam then gets the classifier contribution instead, so the
+    search never sees a neutral 0 that would stop penalising doubtful steps."""
     if verifier is None:
         raise ValueError("intervention requires a verifier but none was given")
     # Group by shared parent history so siblings from the same expansion
@@ -311,8 +315,13 @@ def _apply_verifier(
     for history, group in by_history.items():
         steps = [b.history[-1] for b in group]
         results = verifier.verify_many(question, list(history), steps)
-        stats.lean_calls += len(steps)
         for beam, result in zip(group, results):
+            if result.verified is None:
+                if policy is None:
+                    raise ValueError("verifier declined a step but no policy is available to fall back on")
+                beam.add_step_score(config.alpha * _beam_logit(policy, question, beam))
+                continue
+            stats.lean_calls += 1
             beam.add_step_score(
                 config.verify_accept_bonus if result.verified else config.verify_reject_penalty
             )
@@ -337,7 +346,7 @@ def _apply_hybrid(
         else:
             unsure.append(beam)
     if unsure:
-        _apply_verifier(unsure, question, verifier, config, stats)
+        _apply_verifier(unsure, question, verifier, config, stats, policy=policy)
 
 
 def _prune(pool: List[_Beam], beam_width: int) -> List[_Beam]:

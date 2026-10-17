@@ -539,6 +539,64 @@ it does carry some truth signal (correct trajectories have higher step rates, §
 which is why selecting on it shortens and concretises steps (§8.3, §8.6) rather than
 fixing answers.
 
+## 10. Lean in the loop — hybrid beam search gated by the Qwen3 judge (Oct 16–17)
+
+The one decoding mechanism that does not depend on the judge's AUC: `lean_constrained_beam_search`
+with `INTERVENE_HYBRID`. Each candidate step whose calibrated probability under
+`forked_supervised_qwen3` is ≥ 0.25 gets the classifier term (α = 1, mean aggregation, as
+in §8.3); below 0.25 it is sent to real Lean (same pipeline and settings as every label in
+this file), and a failed check scores −50 (the beam is pruned). A per-problem budget of
+24 real Lean calls; a first unbudgeted run was spending up to 61 calls on single problems
+and was stopped at 10 problems. `hybrid_beam_decode.py`; 110 easy problems, 18.1 GPU-h
+decode + 13.1 GPU-h to label the final trajectories (verdicts obtained *during* decoding
+are reused as labels — same pipeline, same settings). Arm `beam_hybrid_qwen3_t0.25_b24`.
+
+Lean usage: 1,260 real calls (11.5 per problem; 30.9% of checked candidates proved); the
+judge asked for 6,391 escalations, so the budget bound on 33 problems; 30 problems never
+escalated (on those the decode is identical to `beam_forked_qwen3`, 30/30 same outcome).
+
+| arm | acc | acc vs `beam_lm` (W/L, p) | steps/sol | words/step | step rate | word share | proved steps |
+|---|---|---|---|---|---|---|---|
+| `beam_lm` | 0.655 | — | 9.3 | 11.6 | 0.526 | 0.522 | 4.26 |
+| `beam_forked_qwen3` (judge only) | 0.627 | 8/11, p = 0.65 | 9.3 | 9.0 | 0.557 | 0.543 | 4.76 |
+| `beam_hybrid_qwen3_t0.25_b24` | 0.645 | 12/13, p = 1.00 | **15.0** | 7.9 | **0.601** | **0.601** | **5.43** |
+
+Paired vs `beam_lm` (110 problems): step rate 50/31, Wilcoxon **p = 0.001**; word share
+53/34, **p = 0.002**; proved steps 49/26, **p = 0.001**; correct 12/13, p = 0.84. Paired vs
+the judge-only arm: word share 34/19, **p = 0.004**; step rate p = 0.007; correct 7/5. By
+level the word-share gain is +13 (L1, p = 0.02), +7 (L2, p = 0.08), +6 (L3, p = 0.11)
+points. **This is the first arm in the project whose real-formalization gain is
+significant on the granularity-robust measure, at unchanged accuracy.**
+
+Two caveats that qualify it:
+
+1. **Per-problem vs pooled.** The table averages per problem. Pooled over all steps the
+   picture inverts: hybrid 0.361 step rate / 0.391 word share vs `beam_lm` 0.458 / 0.370
+   and judge-only 0.513 / 0.503. The hybrid arm's gain lives on short solutions; its long
+   solutions carry many unproved steps.
+2. **The budget fallback was degenerate.** Split by Lean usage:
+
+   | group | n | acc `beam_lm` → hybrid | word share `beam_lm` → hybrid (Wilcoxon p) | steps/sol `beam_lm` → hybrid |
+   |---|---|---|---|---|
+   | no Lean call | 30 | 0.733 → 0.800 | 0.663 → 0.721 (0.11) | 5.9 → 6.2 |
+   | Lean used, within budget | 47 | 0.723 → 0.723 | 0.526 → 0.606 (**0.064**) | 7.9 → 7.5 |
+   | budget hit | 33 | 0.485 → **0.394** | 0.387 → 0.484 (0.048) | 14.4 → **33.8** |
+
+   Once the 24 calls were spent, unsure steps were *trusted* (score 0 instead of the
+   classifier's negative logit), so the search stopped penalising doubtful steps and ran
+   to 34-step solutions on the 33 hardest problems, losing 3 answers there. The clean
+   evidence for Lean-in-the-loop is the middle row: where Lean ran within budget, word
+   share +8 points at identical accuracy, solutions no longer. Fixed (`_apply_verifier`
+   now falls back to the classifier term when the verifier declines a step, tested in
+   `tests/test_beam_search.py`); the arm is being re-run as `…_b24f` and this section will
+   be updated with it.
+
+Reading so far: real Lean as a pruning oracle does what the learned judge could not — it
+raises the *verified* content of the final solution significantly — and, like every
+other arm, it leaves answer accuracy where the search alone puts it. Cost: ~11 real Lean
+calls per problem (~0.15 GPU-h/problem at 8 prover samples), i.e. ~30× the judge-only
+arm's decode cost.
+
 ## 6. Files
 
 | file | role |
