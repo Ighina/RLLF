@@ -3,7 +3,10 @@
 Status: experiment 1 fits done (§7.4); **experiment 2 done — null on formalization and
 accuracy** (§5.1–5.3); **`full_trajectory_rerank` plug-in done — null on the 15-problem cache** (§4.1); **Qwen3-1.7B
 encoder refit done (§8) — a much better step judge (AUC 0.72 OOD), still no accuracy or
-significant formalization gain.**
+significant formalization gain on easy problems.** α sweep (§8.6), refutation probe (§9),
+**Lean-in-the-loop (§10.1: +6 pts verified content, accuracy unchanged)** and **hard-problem
+rerank (§11.1: first accuracy gain, +0.075 [+0.013, +0.138])** done; hard beam arms (§11.2)
+labelling.
 
 ## 1. Why
 
@@ -582,20 +585,47 @@ Two caveats that qualify it:
    | Lean used, within budget | 47 | 0.723 → 0.723 | 0.526 → 0.606 (**0.064**) | 7.9 → 7.5 |
    | budget hit | 33 | 0.485 → **0.394** | 0.387 → 0.484 (0.048) | 14.4 → **33.8** |
 
-   Once the 24 calls were spent, unsure steps were *trusted* (score 0 instead of the
+Once the 24 calls were spent, unsure steps were *trusted* (score 0 instead of the
    classifier's negative logit), so the search stopped penalising doubtful steps and ran
-   to 34-step solutions on the 33 hardest problems, losing 3 answers there. The clean
-   evidence for Lean-in-the-loop is the middle row: where Lean ran within budget, word
-   share +8 points at identical accuracy, solutions no longer. Fixed (`_apply_verifier`
-   now falls back to the classifier term when the verifier declines a step, tested in
-   `tests/test_beam_search.py`); the arm is being re-run as `…_b24f` and this section will
-   be updated with it.
+   to 34-step solutions on the 33 hardest problems, losing 3 answers there. Fixed:
+   `_apply_verifier` now falls back to the classifier term when the verifier declines a
+   step (`tests/test_beam_search.py`), and the arm was re-run from scratch — below.
 
-Reading so far: real Lean as a pruning oracle does what the learned judge could not — it
-raises the *verified* content of the final solution significantly — and, like every
-other arm, it leaves answer accuracy where the search alone puts it. Cost: ~11 real Lean
-calls per problem (~0.15 GPU-h/problem at 8 prover samples), i.e. ~30× the judge-only
-arm's decode cost.
+### 10.1 Corrected run — `beam_hybrid_qwen3_t0.25_b24f` (Oct 18–19)
+
+Same threshold and budget; declined steps get the classifier term. 27.9 GPU-h decode
+(1,257 real Lean calls, 11.4 per problem; the judge asked for 2,607, budget bound on the
+same 33 problems) + 4.3 GPU-h to label the 318 final-trajectory steps not already
+verified during decoding. All 110 problems fully labelled in every arm (6,426 labels).
+
+| arm | acc | acc vs `beam_lm` (W/L) | steps/sol | words/sol | step rate | word share | proved steps | pooled step rate | pooled word share |
+|---|---|---|---|---|---|---|---|---|---|
+| `beam_lm` | 0.655 | — | 9.3 | 108 | 0.526 | 0.522 | 4.26 | 0.458 | 0.370 |
+| `beam_forked_qwen3` (judge only) | 0.627 | 8/11 | 9.3 | 84 | 0.557 | 0.543 | 4.76 | 0.513 | 0.503 |
+| **`beam_hybrid_qwen3_t0.25_b24f`** | **0.655** | 11/11 | 9.4 | 85 | **0.588** | **0.580** | **5.16** | **0.551** | **0.527** |
+
+Paired vs `beam_lm`: step rate 48/32, Wilcoxon **p = 0.006**; word share 57/31, sign
+**p = 0.007**, Wilcoxon **p = 0.004**; proved steps 51/23, **p = 0.002**; correct 11/11,
+p = 1.0. Paired vs the judge-only arm: word share 30/20, **p = 0.038**; step rate p = 0.08;
+correct 8/5. By level vs `beam_lm` the word-share gain is +13 points at level 1
+(p = 0.002), +4 at level 2 (p = 0.14), +4 at level 3 (p = 0.27). The runaway is gone
+(9.4 steps/solution; budget-hit problems 15.2 vs 14.8 for `beam_lm`, accuracy 0.455 =
+0.455 there), and the per-problem and pooled measures now agree.
+
+Split by Lean usage (word share `beam_lm` → hybrid): no Lean call (30) 0.663 → 0.721;
+Lean within budget (47) 0.534 → 0.575; budget hit (33) 0.376 → 0.458 (p = 0.046).
+
+**Reading (final).** Real Lean as a pruning oracle inside beam search is the one
+intervention in this project that raises the verified content of the final solution
+significantly — +6 points of proved step rate and +6 points of proved word share over
+the search alone, +4 over the best learned judge, on the granularity-robust measure,
+with answer accuracy exactly where the search alone puts it (0.655 = 0.655). The learned
+judge's role is to decide *which* steps are worth a Lean call: ~11 calls per problem
+(≈ 0.25 GPU-h/problem at 8 prover samples) instead of the ~70 candidates a beam of 4 × 2
+generates. On MATH-500 levels 1–3 this buys formalization, not correctness — the same
+decoupling as every other arm on these problems (§5.4, §8.4, §8.6); §11 is where the
+coupling appears.
+
 
 ## 11. Hard problems — MATH-500 levels 4–5 (Oct 15–18)
 
