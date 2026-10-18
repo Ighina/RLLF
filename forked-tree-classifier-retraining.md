@@ -351,6 +351,243 @@ points of accuracy in reranking on this data (single split, no significance test
 experiments above fail to get that because the learned judge reaches only AUC ~0.63 on new
 problems (§5.3), not because the target is useless.
 
+## 6. Files
+
+| file | role |
+|---|---|
+| `rllf/data/forked_tree.py` | `ForkedTree`/`ForkedTrajectory`, `step_key`, `unique_steps`, `sibling_pairs`, label→example builders (`build_prm_examples`, `build_sibling_pairs`, `build_problem_pairs`, `build_trajectory_groups`), `split_trees`, `summarize`, JSONL I/O |
+| `rllf/generation/forked_sampling.py` | `ForkConfig`, `continue_trajectory`, `sample_forked_tree` |
+| `rllf/generation/base_model.py` | `StepNativeHFBaseModel` (SFT prompt, special tokens preserved) |
+| `rllf/data/step_sft.py` | `render_step_sft_prompt` (shared by trainer and decoder) |
+| `rllf/policy/training.py` | `train_trajectory_listwise`, `evaluate_trajectory_groups` |
+| `rllf/evaluation/forked_tree_eval.py` | held-out tree metrics, `format_tree_report` |
+| `rllf/protocol.py` | `extract_boxed` (balanced braces) |
+| `scripts/train_forked_classifier.py` | experiment 1 fits + comparison table |
+| `tests/test_forked_tree.py` | 12 tests (sampler on a scripted step model, dedup, pairs, builders, listwise training, evaluation) |
+| scratchpad `forked_tree_sample.py` / `forked_tree_real_lean.py` (+ `launch_*.sh`) | the two GPU jobs; outputs under `/scratch/users/iacopog/rllf-runs/forked_tree/` |
+| `…/forked_tree/scripts/launch_qwen3_refit.sh`, `exp2_step_auc.py`, `rerank15_bootstrap.py` | §8: Qwen3-1.7B refit chain, step AUC per evaluation set, rerank bootstrap |
+| `…/forked_tree/scripts/beam_decode_v2.py`, `negation_probe.py`, `binder_rerun.py`, `hybrid_beam_decode.py`, `hard_forked_sample.py`, `regrade_arms.py` | §8.6 α sweep / hard set, §9 refutation probe, `experiments_v1.md` §9.4 binder re-run, Lean-in-the-loop, hard forked trees, answer re-grade |
+
+## 7. Results
+
+### 7.1 Sampling (done — 1.40 GPU-h, 1 h 24 min, 33 s/problem average)
+
+| | |
+|---|---|
+| problems / trajectories | 150 / 600 (30 per level) |
+| steps total / unique | 9,460 / **5,415** — a 43% Lean saving from shared prefixes (estimate was 35%) |
+| steps per trajectory | 15.8 (the step-native model writes finer steps than natural Qwen2.5-7B's 10.6 after retro-segmentation) |
+| sibling pairs (distinct steps behind an identical prefix) | 320 of 450 forks (the rest: identical re-draw, or the fork produced `<final>` where the parent had a step) |
+| reached a final answer | 589 / 600; every stop reason was `final`, none hit the safety ceiling |
+| correct (after re-grade) | 191 / 600 = 32% (79 before `MathEquivalenceChecker`); MATH-train levels 4–5 are much harder than the MATH-500 subset the 66% figure comes from |
+
+Lean budget at 5,415 unique steps ≈ 83 GPU-h at the observed 65 steps/GPU-h.
+`forked-tree-lean` is queued (48 h limit, resumes from its every-3-steps checkpoint;
+work is ordered round-robin over levels so any partial label file is level-balanced).
+
+### 7.2 Lean labels — done (5,415 / 5,415, 27.6% proved)
+
+The first 2.5 h of labelling (198 steps, 87 steps/GPU-h) surfaced a bug in the
+pipeline itself: `_THEOREM_RE` required a `:` straight after the theorem name, so
+every Goedel statement with explicit binders — `theorem step_0 (A B C : ℝ)
+(h : A + B + C = π) : …`, i.e. any step that mentions variables or hypotheses — was
+rejected as "no parseable theorem statement" and counted as a formalize-stage
+failure. On the triangle-angle problem that was 127/127 steps; binder-free concrete
+arithmetic passed. Fixed (`rllf/verification/real_lean_pipeline.py`, tested in
+`tests/test_real_lean_pipeline.py`), the 127 wrongly-failed entries were dropped from
+the cache, and the job was resubmitted (the 71 prove/proved verdicts are kept).
+
+This bug predates this run: the earlier real-Lean caches carry 84 (§10), 79/74
+(§8.1/§8.2 arms), 154 (§4) and 216 (§8.3) formalize-stage failures — 10–17% of their
+steps — a large share of which are binder statements that were never sent to the
+prover. Since those caches store the failing step, re-running *only* those ~607
+entries with the fix costs ~7 GPU-h and is queued as an open item; until then every
+earlier real-formalization rate is a lower bound biased against symbolic/contextual
+steps.
+
+**Second restart — the pipeline was formalizing the problem, not the step.** After the
+regex fix the proved rate stayed at 3% and throughput fell to 20 steps/GPU-h. The stored
+statements showed why: "Definition: cot θ = cos θ/sin θ" was formalized as
+`Real.cot (−π/3) = −√3/3` (the problem's answer), "In any triangle A+B+C=π" as the whole
+determinant, "Let θ₁ = π/70" as the entire reflection problem. `render_step_claim` leads
+with `Problem: …` and Goedel's prompt asks for "the following problem statement". This is
+not specific to the step-native model: the older caches that stored statements show
+33–38% of steps sharing a *verbatim* conclusion with another step of the same problem
+(`experiments_v1.md` §9.2). Job killed at 371 labels; all of them discarded.
+
+Formalize-only probe on 37 steps from 5 trees (`claim_rendering_probe*.py`, ~5 GPU-min
+each), scoring each rendering by token overlap of the Lean statement with the step vs.
+with problem-only tokens, and by how often the statement equals Goedel's formalization
+of the bare problem:
+
+| rendering | step overlap | problem-only overlap | notes |
+|---|---|---|---|
+| current (`Problem / Previous steps / Step to verify`) | 0.471 | 0.258 | mostly the problem or its answer |
+| `prove_that` ("In the context of …, assuming (1)…(n), prove that {step}") | 0.599 | 0.277 | tracks the step but smuggles the answer back in (`… ∧ m = 189`) |
+| `claim_last` ("Setting (background only) / Facts / The statement to formalize is exactly: Claim: …") | 0.512 | **0.210** | clean step statements: `A + B + C = π`, `sin(π/3) = √3/2`, `∀θ, sin(−θ) = −sin θ`; still falls back to the problem on under-specified steps |
+
+Probe v2, same 37 steps:
+
+| rendering | step overlap | problem-only overlap | notes |
+|---|---|---|---|
+| `claim_last` (repeat) | 0.488 | 0.208 | still the determinant on 5 of the 8 cofactor/minor steps |
+| `claim_first_last` (claim stated before *and* after the background) | 0.552 | 0.146 | better, but still the matrix on 3 of 8 |
+| **`facts_only`** (no problem text; previous steps as numbered hypotheses; `Statement to formalize: {step}`) | **0.606** | **0.158** | the conclusions *are* the steps: `(a13 = 1 ∧ a33 = 1)`, `(−1)^(2+4)·1 = 1`, `cofactor_14 = −1`, `R (R l) = l`, `θ₁ = π/70 ∧ θ₂ = π/54`, `m_refl = (m·tanθ − tanθ)/(1 − m·tan²θ)` |
+
+Every rendering that kept the problem text, however de-emphasised, fell back to it on
+some steps; removing it is what works. **Adopted:** `render_step_claim(…, style="facts")`
+is now the default in `rllf/verification/real_lean_pipeline.py` (`style="legacy"`
+reproduces the old prompt); `RealFormalizabilityScorer(claim_style=…)` threads it
+through. Known trade-off: a step whose variables are introduced only in the problem
+statement and never restated gets formalized without that context — in the probe the
+generators restated them in the previous steps every time, and a definition step
+(`Let θ₁ = π/70`) is now trivially provable, which is the same property FaithformBench's
+own step labels have. Labelling relaunched from zero under the new rendering
+(`real_lean_legacy_rendering_discarded.json` keeps the 371 old verdicts for reference).
+
+**Throughput and the label settings (decided at label #1026).** Under the step-level
+rendering the job settled at ~20 steps/GPU-h across five trees (≈270 GPU-h for the full
+set) with 28% proved (79% on the level-1 tree, 12–25% on levels 2–5). The log showed
+where the time went: prover candidates parse cleanly (0% runaway, 13.8/16 spliced) and
+successes come early — the first successful candidate is within the first 4 for 73% of
+proved steps and within the first 8 for 86% — while every candidate was Lean-checked
+with VeriForm's default **300 s timeout and `maxHeartbeats 0`**, so a failing step (72% of
+them) paid the slowest candidate's full search. Adopted (user decision): **8 prover
+samples, Lean timeout 60 s, `maxHeartbeats 400000`** (`RealFormalizabilityScorer(
+prover_batch_size=8, lean_timeout=60, max_heartbeats=…)`, `cap_heartbeats` rewrites
+Goedel's header). Expected cost: ~14% fewer positives than n=16 plus rare timeouts, for a
+3–4× speed-up (~70–90 GPU-h for the remainder). The first 1,026 labels (n=16, 300 s,
+unbounded) are kept and are at least as lenient; every label now records its `settings`.
+
+### 7.3 Experiment 1 fits — round 1 at the halfway mark (2,700 labels, snapshot)
+
+MiniLM-L6, by-problem 120/30 tree split, CPU. Fit side: 2,439 labelled states (29%
+proved), 254 sibling pairs of which 43 labelled on both sides, 62 complete trajectory
+groups. **Held-out side is still small — 261 labelled steps, 9 complete groups, 6
+labelled sibling pairs — so every number below is direction, not result.**
+
+| policy | step AUC vs Lean | PRM pick | ORM pick | random | oracle | PRM ρ | ORM ρ |
+|---|---|---|---|---|---|---|---|
+| `forked_supervised` (BCE, best epoch = 2) | **0.643** | 0.465 | 0.482 | 0.418 | 0.516 | **+0.297** | **+0.334** |
+| `forked_pairwise` (last epoch) | 0.531 | 0.396 | 0.439 | 0.418 | 0.516 | −0.230 | +0.243 |
+| `forked_listwise` (last epoch) | 0.394 | 0.417 | 0.446 | 0.418 | 0.516 | −0.221 | +0.248 |
+| `forked_orm_true_rate` (outcome head only) | 0.373 | 0.444 | 0.412 | 0.418 | 0.516 | +0.119 | −0.018 |
+| old `prm_verifiability_all8_majority` | 0.560 | 0.451 | 0.464 | 0.418 | 0.516 | −0.041 | +0.117 |
+| old `prm_agreement_all8_majority` | 0.614 | 0.497 | 0.410 | 0.418 | 0.516 | +0.343 | −0.290 |
+| old `prm_verifiability_gpt-5.2` | 0.463 | 0.427 | 0.416 | 0.418 | 0.516 | +0.074 | −0.098 |
+
+Reading: (i) the same-problem data with the *old* loss (BCE, held-out-selected epoch)
+already turns the within-problem correlation positive (+0.30 PRM / +0.33 ORM vs −0.04 for
+the old verifiability policy) and gives the best step AUC — the thing the redesign was
+for; (ii) the two ranking objectives are not informative in this round for tuning
+reasons, not data reasons: pairwise memorised (train loss 0.79 → 0.06 while held-out pair
+accuracy peaked at epoch 0–1 and decayed) and the reported model is the last epoch;
+listwise barely trained (loss 2.21 → 2.18 at lr 3e-4); ORM had 62 groups and stayed at the
+uniform-softmax loss (ln 4 ≈ 1.386). Round 2 (queued on the same snapshot): best-held-out-
+epoch restore for the ranking trainers (`_BestCheckpoint`, `--patience`), listwise at
+lr 1e-3, and BCE + auxiliary pair loss (`--rank-weight 0.5`). (iii) The old agreement
+classifier again transfers better than the old verifiability one (0.614 vs 0.560; ρ +0.34)
+— third time this direction has appeared, still on a small held-out set.
+
+**Round 2 (same snapshot, best held-out epoch restored):**
+
+| policy | step AUC | sibling acc | PRM pick | ORM pick | PRM ρ | ORM ρ | best epoch |
+|---|---|---|---|---|---|---|---|
+| `forked_pairwise_r2` | 0.642 | 0.583 | 0.437 | 0.389 | +0.050 | −0.418 | 0 (pair acc 0.597) |
+| `forked_listwise_r2` (lr 1e-3) | 0.607 | 0.667 | 0.421 | 0.411 | −0.006 | −0.005 | 2 (pair acc 0.470) |
+| `forked_supervised_rank0.5_r2` (BCE + 0.5·pair) | 0.642 | 0.750 | 0.464 | 0.428 | +0.198 | +0.043 | 0–1 |
+| `forked_supervised` (round 1, BCE) | 0.643 | 0.583 | 0.465 | 0.482 | +0.297 | +0.334 | 2 |
+
+*Answer accuracy of the picked trajectory* (same 9 held-out groups; random pick 0.278,
+oracle — any correct trajectory — 0.444, so one problem = 0.111): PRM / ORM pick —
+`forked_supervised` 0.333 / **0.444**, `+rank0.5` 0.444 / 0.333, `pairwise_r2` 0.444 / 0.444,
+`listwise_r2` 0.222 / 0.333, `orm` 0.333 / 0.222, old verifiability 0.222 / 0.444, old
+agreement 0.444 / 0.111. Too coarse to rank policies at this size; the metric is now part
+of the standard report (`format_tree_report`, second block) for the full-data run.
+
+With early stopping the ranking objectives reach the same step AUC as BCE (0.64) but add
+nothing to within-problem selection (ρ ≈ 0 to +0.2 vs +0.30 for plain BCE), and the
+held-out pair accuracy they optimise never exceeds 0.60. On this snapshot plain BCE on
+the same-problem data is the best of the new fits. Held-out side still 9 groups / 6
+sibling pairs — the ranking conclusion in particular should be re-read at full data,
+since the ranking losses are the ones that need many labelled sibling pairs (43 on the
+fit side so far).
+
+Smoke run of `scripts/train_forked_classifier.py --objective pairwise` on the first 1,326
+labels (CPU, 5.6 min): 120/30 tree split, 14 sibling + 478 within-problem + 24 same-prefix
+pairs, held-out pair accuracy 0.63 → 0.74 over two epochs, comparison table and
+checkpoint written. **Not results** — the held-out side had 128 labelled steps, 5 complete
+trajectory groups and 3 labelled sibling pairs. One early signal to re-check at scale: on
+those steps the old *agreement* classifier scores step AUC 0.688 and the old verifiability
+one 0.634 against the step-level labels, both above the 0.55–0.61 they scored against the
+problem-level labels in `experiments_v1.md` §10.2.
+
+**Completion (Oct 1–3).** Two more interruptions, neither touching the labels: (i) the
+job died with the session that had launched it (`gpuq submit &` was a child of that
+shell; exit −15 at 4,770) — relaunched detached (`setsid nohup`), with the conda env
+pinned in the launch script and the scripts moved to
+`/scratch/users/iacopog/rllf-runs/forked_tree/scripts/`; (ii) at 5,295 one step's
+formalizer prompt was 8,267 tokens, over Goedel-Formalizer's `max_model_len=8192` — the
+`facts` rendering lists every previous step, so deep steps of long trajectories grow.
+Fixed by `max_model_len=16384` plus a guard that records a prompt that still does not fit
+as a formalize failure instead of crashing (prompt and sampling unchanged, so earlier
+labels stay comparable). Final: 5,415 labels, 27.6% proved; 138/150 complete trajectory
+groups; 98 sibling pairs labelled on both sides (254 with continuation targets).
+
+### 7.4 Experiment 1 fits — full label set
+
+`run_forked_fits_full.sh`: MiniLM-L6, same by-problem 120/30 split (`seed 0`), CPU, best
+held-out epoch restored for every objective. Fit side 4,435 labelled states, 1,886
+within-problem pairs (73 sibling), 109 trajectory groups; held-out 980 steps, 29–30
+groups. Outputs: `/scratch/users/iacopog/rllf-runs/forked_tree/classifiers_full/`, log
+`logs/forked_fits_full.log`.
+
+*Formalization of the picked trajectory* (true Lean-proved step rate; random 0.302,
+oracle 0.422):
+
+| policy | step AUC | sibling acc | PRM pick | ORM pick | PRM ρ | ORM ρ | training note |
+|---|---|---|---|---|---|---|---|
+| `forked_supervised` (BCE) | **0.692** | 0.500 | **0.344** | 0.275 | +0.158 | −0.108 | AUC rises every epoch 0.660 → 0.692 |
+| `forked_supervised_rank0.5` | 0.685 | 0.500 | 0.336 | 0.332 | +0.157 | +0.202 | best epoch 1 |
+| `forked_pairwise` | 0.480 | 0.500 | 0.302 | 0.285 | +0.008 | −0.062 | best epoch 0 (pair acc 0.594), then memorises |
+| `forked_listwise` (lr 1e-3) | 0.524 | 0.480 | 0.290 | 0.316 | +0.047 | +0.577 | loss flat at 2.23 — did not train |
+| `forked_orm_true_rate` | 0.383 | 0.540 | 0.302 | 0.308 | −0.036 | +0.166 | loss ≈ ln 4 — did not train |
+| `forked_orm_correct` | 0.362 | 0.620 | 0.283 | 0.320 | −0.122 | +0.100 | loss ≈ ln 4 — did not train |
+| old `prm_verifiability_all8_majority` | 0.599 | 0.540 | 0.323 | 0.297 | +0.068 | +0.003 | |
+| old `prm_agreement_all8_majority` | 0.478 | 0.460 | 0.341 | 0.334 | +0.173 | −0.005 | |
+| old `prm_verifiability_gpt-5.2` | 0.552 | 0.500 | 0.321 | 0.292 | +0.118 | −0.033 | |
+
+*Answer accuracy of the picked trajectory* (random 0.275, oracle 0.467; one problem =
+0.033), PRM / ORM: `forked_supervised` 0.333 / 0.233, `+rank0.5` 0.300 / 0.333,
+`pairwise` 0.267 / 0.167, `listwise` 0.367 / 0.267, `orm_true_rate` 0.200 / 0.400,
+`orm_correct` 0.200 / 0.333; old verifiability 0.300 / 0.367, old agreement
+0.333 / 0.200, old gpt-5.2 0.333 / 0.200.
+
+Reading:
+
+1. **The distribution problem is fixed; the selection problem only partly.** Plain BCE
+   on the generator's own Lean-labelled steps gives step AUC 0.692 on held-out problems,
+   against 0.48–0.60 for every FaithformBench-trained classifier on the same steps (and
+   against the 0.50–0.61 of §10.2). That gain does not carry over to choosing between a
+   problem's trajectories: PRM pick 0.344 recovers about a third of the random → oracle
+   gap (0.302 → 0.422), within-problem ρ is +0.16, and the old agreement classifier
+   reaches the same (0.341, +0.17). Between-policy differences in pick rate and accuracy
+   are 1–2 problems out of 30 — not separable at this size.
+2. **The halfway signal shrank.** The +0.30 / +0.33 ρ of §7.3 (9 held-out groups) is
+   +0.16 / −0.11 on 30 groups; the halfway number was mostly noise.
+3. **No ranking objective helps.** Pairwise peaks at epoch 0 and then memorises the 73
+   sibling pairs; listwise and both ORMs never leave the uniform-softmax loss. The ORM
+   targets differ within a group by little (sibling continuations share most of their
+   steps), so a single trajectory-level score per solution gives a near-zero gradient.
+   Listwise's ORM ρ +0.577 sits with a 0.316 ORM pick (≈ random) and an untrained loss;
+   treat it as noise, not signal.
+4. **What this means for the plug-in.** `forked_supervised` is the checkpoint to try in
+   `full_trajectory_rerank`, but the held-out trees predict at best a small gain over
+   random selection there. Step-level discrimination (experiment 2's boundary decision,
+   where the classifier is asked about one step behind a fixed prefix) is where the AUC
+   gain is most directly usable; the sibling accuracy of 0.50 above is on only 25
+   held-out pairs labelled on both sides.
+
 ## 8. Capacity: refitting the forked classifier with a Qwen3-1.7B encoder (Oct 14–15)
 
 Question: is the OOD step-AUC ceiling of §5.3 / §4.1 (0.57–0.63) a *capacity* limit of
@@ -687,241 +924,3 @@ Reading:
    One split, one base model, one seed. It needs the 110-problem beam set (§11.2) and,
    ideally, a second sample of hard problems before it is a headline number rather than
    a strong lead.
-
-## 6. Files
-
-| file | role |
-|---|---|
-| `rllf/data/forked_tree.py` | `ForkedTree`/`ForkedTrajectory`, `step_key`, `unique_steps`, `sibling_pairs`, label→example builders (`build_prm_examples`, `build_sibling_pairs`, `build_problem_pairs`, `build_trajectory_groups`), `split_trees`, `summarize`, JSONL I/O |
-| `rllf/generation/forked_sampling.py` | `ForkConfig`, `continue_trajectory`, `sample_forked_tree` |
-| `rllf/generation/base_model.py` | `StepNativeHFBaseModel` (SFT prompt, special tokens preserved) |
-| `rllf/data/step_sft.py` | `render_step_sft_prompt` (shared by trainer and decoder) |
-| `rllf/policy/training.py` | `train_trajectory_listwise`, `evaluate_trajectory_groups` |
-| `rllf/evaluation/forked_tree_eval.py` | held-out tree metrics, `format_tree_report` |
-| `rllf/protocol.py` | `extract_boxed` (balanced braces) |
-| `scripts/train_forked_classifier.py` | experiment 1 fits + comparison table |
-| `tests/test_forked_tree.py` | 12 tests (sampler on a scripted step model, dedup, pairs, builders, listwise training, evaluation) |
-| scratchpad `forked_tree_sample.py` / `forked_tree_real_lean.py` (+ `launch_*.sh`) | the two GPU jobs; outputs under `/scratch/users/iacopog/rllf-runs/forked_tree/` |
-| `…/forked_tree/scripts/launch_qwen3_refit.sh`, `exp2_step_auc.py`, `rerank15_bootstrap.py` | §8: Qwen3-1.7B refit chain, step AUC per evaluation set, rerank bootstrap |
-| `…/forked_tree/scripts/beam_decode_v2.py`, `negation_probe.py`, `binder_rerun.py`, `hybrid_beam_decode.py`, `hard_forked_sample.py`, `regrade_arms.py` | §8.6 α sweep / hard set, §9 refutation probe, `experiments_v1.md` §9.4 binder re-run, Lean-in-the-loop, hard forked trees, answer re-grade |
-
-## 7. Results
-
-### 7.1 Sampling (done — 1.40 GPU-h, 1 h 24 min, 33 s/problem average)
-
-| | |
-|---|---|
-| problems / trajectories | 150 / 600 (30 per level) |
-| steps total / unique | 9,460 / **5,415** — a 43% Lean saving from shared prefixes (estimate was 35%) |
-| steps per trajectory | 15.8 (the step-native model writes finer steps than natural Qwen2.5-7B's 10.6 after retro-segmentation) |
-| sibling pairs (distinct steps behind an identical prefix) | 320 of 450 forks (the rest: identical re-draw, or the fork produced `<final>` where the parent had a step) |
-| reached a final answer | 589 / 600; every stop reason was `final`, none hit the safety ceiling |
-| correct (after re-grade) | 191 / 600 = 32% (79 before `MathEquivalenceChecker`); MATH-train levels 4–5 are much harder than the MATH-500 subset the 66% figure comes from |
-
-Lean budget at 5,415 unique steps ≈ 83 GPU-h at the observed 65 steps/GPU-h.
-`forked-tree-lean` is queued (48 h limit, resumes from its every-3-steps checkpoint;
-work is ordered round-robin over levels so any partial label file is level-balanced).
-
-### 7.2 Lean labels — done (5,415 / 5,415, 27.6% proved)
-
-The first 2.5 h of labelling (198 steps, 87 steps/GPU-h) surfaced a bug in the
-pipeline itself: `_THEOREM_RE` required a `:` straight after the theorem name, so
-every Goedel statement with explicit binders — `theorem step_0 (A B C : ℝ)
-(h : A + B + C = π) : …`, i.e. any step that mentions variables or hypotheses — was
-rejected as "no parseable theorem statement" and counted as a formalize-stage
-failure. On the triangle-angle problem that was 127/127 steps; binder-free concrete
-arithmetic passed. Fixed (`rllf/verification/real_lean_pipeline.py`, tested in
-`tests/test_real_lean_pipeline.py`), the 127 wrongly-failed entries were dropped from
-the cache, and the job was resubmitted (the 71 prove/proved verdicts are kept).
-
-This bug predates this run: the earlier real-Lean caches carry 84 (§10), 79/74
-(§8.1/§8.2 arms), 154 (§4) and 216 (§8.3) formalize-stage failures — 10–17% of their
-steps — a large share of which are binder statements that were never sent to the
-prover. Since those caches store the failing step, re-running *only* those ~607
-entries with the fix costs ~7 GPU-h and is queued as an open item; until then every
-earlier real-formalization rate is a lower bound biased against symbolic/contextual
-steps.
-
-**Second restart — the pipeline was formalizing the problem, not the step.** After the
-regex fix the proved rate stayed at 3% and throughput fell to 20 steps/GPU-h. The stored
-statements showed why: "Definition: cot θ = cos θ/sin θ" was formalized as
-`Real.cot (−π/3) = −√3/3` (the problem's answer), "In any triangle A+B+C=π" as the whole
-determinant, "Let θ₁ = π/70" as the entire reflection problem. `render_step_claim` leads
-with `Problem: …` and Goedel's prompt asks for "the following problem statement". This is
-not specific to the step-native model: the older caches that stored statements show
-33–38% of steps sharing a *verbatim* conclusion with another step of the same problem
-(`experiments_v1.md` §9.2). Job killed at 371 labels; all of them discarded.
-
-Formalize-only probe on 37 steps from 5 trees (`claim_rendering_probe*.py`, ~5 GPU-min
-each), scoring each rendering by token overlap of the Lean statement with the step vs.
-with problem-only tokens, and by how often the statement equals Goedel's formalization
-of the bare problem:
-
-| rendering | step overlap | problem-only overlap | notes |
-|---|---|---|---|
-| current (`Problem / Previous steps / Step to verify`) | 0.471 | 0.258 | mostly the problem or its answer |
-| `prove_that` ("In the context of …, assuming (1)…(n), prove that {step}") | 0.599 | 0.277 | tracks the step but smuggles the answer back in (`… ∧ m = 189`) |
-| `claim_last` ("Setting (background only) / Facts / The statement to formalize is exactly: Claim: …") | 0.512 | **0.210** | clean step statements: `A + B + C = π`, `sin(π/3) = √3/2`, `∀θ, sin(−θ) = −sin θ`; still falls back to the problem on under-specified steps |
-
-Probe v2, same 37 steps:
-
-| rendering | step overlap | problem-only overlap | notes |
-|---|---|---|---|
-| `claim_last` (repeat) | 0.488 | 0.208 | still the determinant on 5 of the 8 cofactor/minor steps |
-| `claim_first_last` (claim stated before *and* after the background) | 0.552 | 0.146 | better, but still the matrix on 3 of 8 |
-| **`facts_only`** (no problem text; previous steps as numbered hypotheses; `Statement to formalize: {step}`) | **0.606** | **0.158** | the conclusions *are* the steps: `(a13 = 1 ∧ a33 = 1)`, `(−1)^(2+4)·1 = 1`, `cofactor_14 = −1`, `R (R l) = l`, `θ₁ = π/70 ∧ θ₂ = π/54`, `m_refl = (m·tanθ − tanθ)/(1 − m·tan²θ)` |
-
-Every rendering that kept the problem text, however de-emphasised, fell back to it on
-some steps; removing it is what works. **Adopted:** `render_step_claim(…, style="facts")`
-is now the default in `rllf/verification/real_lean_pipeline.py` (`style="legacy"`
-reproduces the old prompt); `RealFormalizabilityScorer(claim_style=…)` threads it
-through. Known trade-off: a step whose variables are introduced only in the problem
-statement and never restated gets formalized without that context — in the probe the
-generators restated them in the previous steps every time, and a definition step
-(`Let θ₁ = π/70`) is now trivially provable, which is the same property FaithformBench's
-own step labels have. Labelling relaunched from zero under the new rendering
-(`real_lean_legacy_rendering_discarded.json` keeps the 371 old verdicts for reference).
-
-**Throughput and the label settings (decided at label #1026).** Under the step-level
-rendering the job settled at ~20 steps/GPU-h across five trees (≈270 GPU-h for the full
-set) with 28% proved (79% on the level-1 tree, 12–25% on levels 2–5). The log showed
-where the time went: prover candidates parse cleanly (0% runaway, 13.8/16 spliced) and
-successes come early — the first successful candidate is within the first 4 for 73% of
-proved steps and within the first 8 for 86% — while every candidate was Lean-checked
-with VeriForm's default **300 s timeout and `maxHeartbeats 0`**, so a failing step (72% of
-them) paid the slowest candidate's full search. Adopted (user decision): **8 prover
-samples, Lean timeout 60 s, `maxHeartbeats 400000`** (`RealFormalizabilityScorer(
-prover_batch_size=8, lean_timeout=60, max_heartbeats=…)`, `cap_heartbeats` rewrites
-Goedel's header). Expected cost: ~14% fewer positives than n=16 plus rare timeouts, for a
-3–4× speed-up (~70–90 GPU-h for the remainder). The first 1,026 labels (n=16, 300 s,
-unbounded) are kept and are at least as lenient; every label now records its `settings`.
-
-### 7.3 Experiment 1 fits — round 1 at the halfway mark (2,700 labels, snapshot)
-
-MiniLM-L6, by-problem 120/30 tree split, CPU. Fit side: 2,439 labelled states (29%
-proved), 254 sibling pairs of which 43 labelled on both sides, 62 complete trajectory
-groups. **Held-out side is still small — 261 labelled steps, 9 complete groups, 6
-labelled sibling pairs — so every number below is direction, not result.**
-
-| policy | step AUC vs Lean | PRM pick | ORM pick | random | oracle | PRM ρ | ORM ρ |
-|---|---|---|---|---|---|---|---|
-| `forked_supervised` (BCE, best epoch = 2) | **0.643** | 0.465 | 0.482 | 0.418 | 0.516 | **+0.297** | **+0.334** |
-| `forked_pairwise` (last epoch) | 0.531 | 0.396 | 0.439 | 0.418 | 0.516 | −0.230 | +0.243 |
-| `forked_listwise` (last epoch) | 0.394 | 0.417 | 0.446 | 0.418 | 0.516 | −0.221 | +0.248 |
-| `forked_orm_true_rate` (outcome head only) | 0.373 | 0.444 | 0.412 | 0.418 | 0.516 | +0.119 | −0.018 |
-| old `prm_verifiability_all8_majority` | 0.560 | 0.451 | 0.464 | 0.418 | 0.516 | −0.041 | +0.117 |
-| old `prm_agreement_all8_majority` | 0.614 | 0.497 | 0.410 | 0.418 | 0.516 | +0.343 | −0.290 |
-| old `prm_verifiability_gpt-5.2` | 0.463 | 0.427 | 0.416 | 0.418 | 0.516 | +0.074 | −0.098 |
-
-Reading: (i) the same-problem data with the *old* loss (BCE, held-out-selected epoch)
-already turns the within-problem correlation positive (+0.30 PRM / +0.33 ORM vs −0.04 for
-the old verifiability policy) and gives the best step AUC — the thing the redesign was
-for; (ii) the two ranking objectives are not informative in this round for tuning
-reasons, not data reasons: pairwise memorised (train loss 0.79 → 0.06 while held-out pair
-accuracy peaked at epoch 0–1 and decayed) and the reported model is the last epoch;
-listwise barely trained (loss 2.21 → 2.18 at lr 3e-4); ORM had 62 groups and stayed at the
-uniform-softmax loss (ln 4 ≈ 1.386). Round 2 (queued on the same snapshot): best-held-out-
-epoch restore for the ranking trainers (`_BestCheckpoint`, `--patience`), listwise at
-lr 1e-3, and BCE + auxiliary pair loss (`--rank-weight 0.5`). (iii) The old agreement
-classifier again transfers better than the old verifiability one (0.614 vs 0.560; ρ +0.34)
-— third time this direction has appeared, still on a small held-out set.
-
-**Round 2 (same snapshot, best held-out epoch restored):**
-
-| policy | step AUC | sibling acc | PRM pick | ORM pick | PRM ρ | ORM ρ | best epoch |
-|---|---|---|---|---|---|---|---|
-| `forked_pairwise_r2` | 0.642 | 0.583 | 0.437 | 0.389 | +0.050 | −0.418 | 0 (pair acc 0.597) |
-| `forked_listwise_r2` (lr 1e-3) | 0.607 | 0.667 | 0.421 | 0.411 | −0.006 | −0.005 | 2 (pair acc 0.470) |
-| `forked_supervised_rank0.5_r2` (BCE + 0.5·pair) | 0.642 | 0.750 | 0.464 | 0.428 | +0.198 | +0.043 | 0–1 |
-| `forked_supervised` (round 1, BCE) | 0.643 | 0.583 | 0.465 | 0.482 | +0.297 | +0.334 | 2 |
-
-*Answer accuracy of the picked trajectory* (same 9 held-out groups; random pick 0.278,
-oracle — any correct trajectory — 0.444, so one problem = 0.111): PRM / ORM pick —
-`forked_supervised` 0.333 / **0.444**, `+rank0.5` 0.444 / 0.333, `pairwise_r2` 0.444 / 0.444,
-`listwise_r2` 0.222 / 0.333, `orm` 0.333 / 0.222, old verifiability 0.222 / 0.444, old
-agreement 0.444 / 0.111. Too coarse to rank policies at this size; the metric is now part
-of the standard report (`format_tree_report`, second block) for the full-data run.
-
-With early stopping the ranking objectives reach the same step AUC as BCE (0.64) but add
-nothing to within-problem selection (ρ ≈ 0 to +0.2 vs +0.30 for plain BCE), and the
-held-out pair accuracy they optimise never exceeds 0.60. On this snapshot plain BCE on
-the same-problem data is the best of the new fits. Held-out side still 9 groups / 6
-sibling pairs — the ranking conclusion in particular should be re-read at full data,
-since the ranking losses are the ones that need many labelled sibling pairs (43 on the
-fit side so far).
-
-Smoke run of `scripts/train_forked_classifier.py --objective pairwise` on the first 1,326
-labels (CPU, 5.6 min): 120/30 tree split, 14 sibling + 478 within-problem + 24 same-prefix
-pairs, held-out pair accuracy 0.63 → 0.74 over two epochs, comparison table and
-checkpoint written. **Not results** — the held-out side had 128 labelled steps, 5 complete
-trajectory groups and 3 labelled sibling pairs. One early signal to re-check at scale: on
-those steps the old *agreement* classifier scores step AUC 0.688 and the old verifiability
-one 0.634 against the step-level labels, both above the 0.55–0.61 they scored against the
-problem-level labels in `experiments_v1.md` §10.2.
-
-**Completion (Oct 1–3).** Two more interruptions, neither touching the labels: (i) the
-job died with the session that had launched it (`gpuq submit &` was a child of that
-shell; exit −15 at 4,770) — relaunched detached (`setsid nohup`), with the conda env
-pinned in the launch script and the scripts moved to
-`/scratch/users/iacopog/rllf-runs/forked_tree/scripts/`; (ii) at 5,295 one step's
-formalizer prompt was 8,267 tokens, over Goedel-Formalizer's `max_model_len=8192` — the
-`facts` rendering lists every previous step, so deep steps of long trajectories grow.
-Fixed by `max_model_len=16384` plus a guard that records a prompt that still does not fit
-as a formalize failure instead of crashing (prompt and sampling unchanged, so earlier
-labels stay comparable). Final: 5,415 labels, 27.6% proved; 138/150 complete trajectory
-groups; 98 sibling pairs labelled on both sides (254 with continuation targets).
-
-### 7.4 Experiment 1 fits — full label set
-
-`run_forked_fits_full.sh`: MiniLM-L6, same by-problem 120/30 split (`seed 0`), CPU, best
-held-out epoch restored for every objective. Fit side 4,435 labelled states, 1,886
-within-problem pairs (73 sibling), 109 trajectory groups; held-out 980 steps, 29–30
-groups. Outputs: `/scratch/users/iacopog/rllf-runs/forked_tree/classifiers_full/`, log
-`logs/forked_fits_full.log`.
-
-*Formalization of the picked trajectory* (true Lean-proved step rate; random 0.302,
-oracle 0.422):
-
-| policy | step AUC | sibling acc | PRM pick | ORM pick | PRM ρ | ORM ρ | training note |
-|---|---|---|---|---|---|---|---|
-| `forked_supervised` (BCE) | **0.692** | 0.500 | **0.344** | 0.275 | +0.158 | −0.108 | AUC rises every epoch 0.660 → 0.692 |
-| `forked_supervised_rank0.5` | 0.685 | 0.500 | 0.336 | 0.332 | +0.157 | +0.202 | best epoch 1 |
-| `forked_pairwise` | 0.480 | 0.500 | 0.302 | 0.285 | +0.008 | −0.062 | best epoch 0 (pair acc 0.594), then memorises |
-| `forked_listwise` (lr 1e-3) | 0.524 | 0.480 | 0.290 | 0.316 | +0.047 | +0.577 | loss flat at 2.23 — did not train |
-| `forked_orm_true_rate` | 0.383 | 0.540 | 0.302 | 0.308 | −0.036 | +0.166 | loss ≈ ln 4 — did not train |
-| `forked_orm_correct` | 0.362 | 0.620 | 0.283 | 0.320 | −0.122 | +0.100 | loss ≈ ln 4 — did not train |
-| old `prm_verifiability_all8_majority` | 0.599 | 0.540 | 0.323 | 0.297 | +0.068 | +0.003 | |
-| old `prm_agreement_all8_majority` | 0.478 | 0.460 | 0.341 | 0.334 | +0.173 | −0.005 | |
-| old `prm_verifiability_gpt-5.2` | 0.552 | 0.500 | 0.321 | 0.292 | +0.118 | −0.033 | |
-
-*Answer accuracy of the picked trajectory* (random 0.275, oracle 0.467; one problem =
-0.033), PRM / ORM: `forked_supervised` 0.333 / 0.233, `+rank0.5` 0.300 / 0.333,
-`pairwise` 0.267 / 0.167, `listwise` 0.367 / 0.267, `orm_true_rate` 0.200 / 0.400,
-`orm_correct` 0.200 / 0.333; old verifiability 0.300 / 0.367, old agreement
-0.333 / 0.200, old gpt-5.2 0.333 / 0.200.
-
-Reading:
-
-1. **The distribution problem is fixed; the selection problem only partly.** Plain BCE
-   on the generator's own Lean-labelled steps gives step AUC 0.692 on held-out problems,
-   against 0.48–0.60 for every FaithformBench-trained classifier on the same steps (and
-   against the 0.50–0.61 of §10.2). That gain does not carry over to choosing between a
-   problem's trajectories: PRM pick 0.344 recovers about a third of the random → oracle
-   gap (0.302 → 0.422), within-problem ρ is +0.16, and the old agreement classifier
-   reaches the same (0.341, +0.17). Between-policy differences in pick rate and accuracy
-   are 1–2 problems out of 30 — not separable at this size.
-2. **The halfway signal shrank.** The +0.30 / +0.33 ρ of §7.3 (9 held-out groups) is
-   +0.16 / −0.11 on 30 groups; the halfway number was mostly noise.
-3. **No ranking objective helps.** Pairwise peaks at epoch 0 and then memorises the 73
-   sibling pairs; listwise and both ORMs never leave the uniform-softmax loss. The ORM
-   targets differ within a group by little (sibling continuations share most of their
-   steps), so a single trajectory-level score per solution gives a near-zero gradient.
-   Listwise's ORM ρ +0.577 sits with a 0.316 ORM pick (≈ random) and an untrained loss;
-   treat it as noise, not signal.
-4. **What this means for the plug-in.** `forked_supervised` is the checkpoint to try in
-   `full_trajectory_rerank`, but the held-out trees predict at best a small gain over
-   random selection there. Step-level discrimination (experiment 2's boundary decision,
-   where the classifier is asked about one step behind a fixed prefix) is where the AUC
-   gain is most directly usable; the sibling accuracy of 0.50 above is on only 25
-   held-out pairs labelled on both sides.
-
