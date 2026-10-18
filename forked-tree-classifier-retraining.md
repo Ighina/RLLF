@@ -597,6 +597,67 @@ other arm, it leaves answer accuracy where the search alone puts it. Cost: ~11 r
 calls per problem (~0.15 GPU-h/problem at 8 prover samples), i.e. ~30× the judge-only
 arm's decode cost.
 
+## 11. Hard problems — MATH-500 levels 4–5 (Oct 15–18)
+
+§5.4 predicted that the Lean rate would carry answer signal only where problems are hard
+enough for wrong trajectories to go wrong *visibly*. Two experiments on the level-4/5 half
+of MATH-500 (131 problems, none used to fit any classifier): full-trajectory rerank on
+forked trees (§11.1), and the beam arms (§11.2, labels still running).
+
+### 11.1 Full-trajectory rerank on 60 hard forked trees — the first accuracy gain
+
+`hard_forked_sample.py`: 30 level-4 + 30 level-5 MATH-500 problems (seed 0), 4 forked
+trajectories each from the step-native Qwen2.5-7B (240 trajectories, 6,780 steps, 3,786
+unique, 44% Lean saving; 219/240 reached an answer; 74/240 = 31% correct). Every unique
+step real-Lean labelled (facts rendering, 8 samples, 60 s): **14.0% proved** (vs 27.6% on
+the MATH-train trees and 46–58% on MATH-500 levels 1–3). 2.0 GPU-h sampling + 53.7 GPU-h
+Lean (two 48-h-capped jobs plus the resume). Analysis `hard_forked_analyse.py`,
+`hard_forked_bylevel.py`; `hard/report_hard_rerank.json`.
+
+**The ceiling exists here.** Picking each problem's trajectory by its *true* Lean rate
+gives accuracy 0.367 vs random 0.308 (any-correct oracle 0.467); within-problem
+ρ(true rate, correct) = **+0.35** over the 22 problems with variation in both; correct
+trajectories prove 0.458 of their steps vs 0.299 for incorrect ones. On the easy rerank
+cache the same oracle pick was *below* random (§4.1). So the decoupling of §4.1/§8 is a
+property of easy problems, as §5.4 said.
+
+**And the Qwen3 judge reaches it.** Per problem, pick the trajectory with the highest
+mean step probability (same protocol as §4.1 / §8.4; CIs: 5,000-sample bootstrap over
+problems):
+
+| policy | step AUC | sibling acc | PRM pick (true rate) | random | oracle | pick − random [95% CI] | within-problem ρ | **pick acc** | random acc | oracle acc | **acc − random [95% CI]** |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `forked_supervised_qwen3` | **0.742** | 0.429 | **0.408** | 0.348 | 0.466 | **+0.060 [+0.032, +0.090]** | **+0.267** | **0.383** | 0.308 | 0.467 | **+0.075 [+0.013, +0.138]** |
+| `forked_supervised` (MiniLM) | 0.695 | 0.671 | 0.369 | 0.348 | 0.466 | +0.021 [−0.014, +0.058] | +0.167 | 0.333 | 0.308 | 0.467 | +0.025 [−0.058, +0.108] |
+| old `prm_verifiability_all8_majority` | 0.651 | 0.614 | 0.354 | 0.348 | 0.466 | +0.006 [−0.023, +0.034] | +0.159 | 0.283 | 0.308 | 0.467 | −0.025 [−0.096, +0.042] |
+
+By level (Qwen3 pick): level 4 — accuracy 0.467 vs random 0.375 (oracle 0.500), true rate
+0.438 vs 0.382; level 5 — accuracy 0.300 vs 0.242 (oracle 0.433), true rate 0.378 vs 0.313.
+The pick beats the problem's random correctness on 17 problems, ties on 38 (all four
+trajectories agree), trails on 5. It is not a length artefact: the picked trajectory is
+*shorter* than the problem's mean at level 4 (19 vs 26 steps) and *longer* at level 5
+(36 vs 31).
+
+Reading:
+
+1. **This is the first selection gain in correctness in the project**, and it comes from
+   exactly the combination the preceding sections isolated: a judge trained on the
+   generator's own Lean-labelled steps (§7), with enough capacity to transfer (§8), applied
+   where formalizability and correctness are coupled (§5.4, here). The Qwen3 pick recovers
+   half the random → true-rate-oracle gap in formalization (0.348 → 0.408 of 0.466) and
+   almost half the random → any-correct gap in accuracy (0.308 → 0.383 of 0.467); the pick
+   is even slightly *above* the true-rate oracle's accuracy (0.367), i.e. the judge's
+   score is as good a correctness proxy as the ground-truth Lean rate on this data.
+2. **Neither weaker judge gets there.** MiniLM on the same data: +0.025 accuracy, CI
+   through zero; the FaithformBench classifier: −0.025. Step AUC orders them (0.742 /
+   0.695 / 0.651) and so do the pick gains — on hard problems the AUC *does* predict the
+   selection gain, unlike on easy ones (§4.1), because here there is a selection signal
+   to be had.
+3. **Size.** +0.075 is 4.5 problems of 60; the CI's lower end is +0.013 (one problem).
+   One split, one base model, one seed. It needs the 110-problem beam set (§11.2) and,
+   ideally, a second sample of hard problems before it is a headline number rather than
+   a strong lead.
+
 ## 6. Files
 
 | file | role |
