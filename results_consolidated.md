@@ -27,13 +27,15 @@ term (α = 1, mean aggregation); hybrid = beam with real Lean on the judge's uns
 | full-trajectory rerank, forked Qwen3 judge (4 forked trajectories) | step-native Qwen2.5-7B | 30 held-out MATH-train trees | random 0.275 | 0.267 | ≈ 0 | FT §8.1 |
 | **full-trajectory rerank, forked Qwen3 judge** | step-native Qwen2.5-7B | **60 MATH-500 L4–5** | random 0.308 (oracle 0.467) | **0.383** | **+0.075 [+0.013, +0.138]** | FT §11.1 |
 | same, forked MiniLM judge / FaithformBench judge | step-native Qwen2.5-7B | 60 L4–5 | random 0.308 | 0.333 / 0.283 | +0.025 [−0.06, +0.11] / −0.025 | FT §11.1 |
-| beam arms on hard problems | step-native Qwen2.5-7B | 110 L4–5 | PENDING_HARD_BEAM | | | FT §11.2 |
+| beam, forked Qwen3 judge, α = 1 | step-native Qwen2.5-7B | **110 L4–5** | beam_lm 0.382 (greedy 0.255) | 0.373 | 7/8, p = 1.0 (beam vs greedy 24/10, p = 0.02) | FT §11.2 |
 
 **Answer:** on easy-to-medium problems (MATH-500 levels 1–3), no — not with any judge,
 any strength, or real Lean in the loop; beam search itself is worth ~+6 points over
 greedy. On hard problems (levels 4–5) the Qwen3 judge trained on the generator's own
-Lean-labelled steps gives the first selection gain in accuracy (+7.5 points, CI excluding
-zero, one 60-problem sample).
+Lean-labelled steps gives the first selection gain in accuracy when it reranks *complete*
+trajectories (+7.5 points, CI excluding zero, one 60-problem sample); steering the beam
+step by step with the same judge does not move accuracy there either (beam search itself
+is worth +13 points on hard problems).
 
 ## B. Does it make the reasoning more formalizable (real Lean, not self-reported)?
 
@@ -47,6 +49,7 @@ zero, one 60-problem sample).
 | **hybrid (Lean in the loop)** | 110 L1–3 | 0.526 / 0.522 | **0.588 / 0.580** | **p = 0.006 / 0.004**; vs judge-only p = 0.04 | FT §10.1 |
 | full-trajectory rerank, Qwen3 judge, natural CoT | 15 L1–3 | random 0.606 | 0.683 | +0.076 [+0.013, +0.138] | FT §8.4 |
 | full-trajectory rerank, Qwen3 judge, hard forked trees | 60 L4–5 | random 0.348 | 0.408 | +0.060 [+0.032, +0.090] | FT §11.1 |
+| beam, forked Qwen3 judge α = 1, **hard problems** | 110 L4–5 | beam_lm 0.371 / 0.342 | **0.404 / 0.386** | **p = 0.04 / 0.018** | FT §11.2 |
 
 **Answer:** learned judges move real formalization by 2–3 points at most on easy problems
 (never significant on the granularity-robust word share); real Lean as a pruning oracle
@@ -58,7 +61,7 @@ selection moves it by +6–8 points with CIs excluding zero.
 | finding | numbers | source |
 |---|---|---|
 | Offline AUC on FaithformBench does not transfer to the generator's own steps | 0.80–0.86 held-out → 0.50–0.61 vs real Lean on decoded steps, every encoder, every label source | §10.2 |
-| Training on the generator's own Lean-labelled steps restores the judge | MiniLM 0.69 in-distribution (0.57–0.63 OOD); **Qwen3-1.7B 0.75 in-distribution, 0.72 / 0.65 / 0.74 OOD** (step-native MATH-500 / natural CoT / hard trees) vs 0.58–0.65 for FaithformBench classifiers | FT §7.4, §8.2, §11.1 |
+| Training on the generator's own Lean-labelled steps restores the judge | MiniLM 0.69 in-distribution (0.57–0.63 OOD); **Qwen3-1.7B 0.75 in-distribution, 0.72 / 0.65 / 0.74 / 0.71 OOD** (step-native MATH-500 / natural CoT / hard trees / hard beam steps) vs 0.55–0.65 for FaithformBench classifiers | FT §7.4, §8.2, §11.1 |
 | Formalizability and correctness decouple on easy problems and couple on hard ones | pick-by-*true*-Lean-rate accuracy: easy cache 0.733 vs random 0.753 (ρ ≈ 0); hard trees **0.367 vs 0.308, ρ = +0.35**; MATH-train trees 0.386 vs 0.318, ρ = +0.25 | FT §4.1, §5.4, §11.1 |
 | "Not proved" is search/statement failure, not falsity | 7 of 300 failures refutable by the prover (2.3%), 0/90 controls | FT §9 |
 | The labels themselves depend on how the step is phrased for the autoformalizer | problem-in-view rendering formalized the *problem* for ~35% of steps; step-level rendering flips 33% of verdicts (66.6% agreement, proved 0.51 → 0.58) | §9.2, FT §4.1 |

@@ -924,3 +924,55 @@ Reading:
    One split, one base model, one seed. It needs the 110-problem beam set (§11.2) and,
    ideally, a second sample of hard problems before it is a headline number rather than
    a strong lead.
+
+### 11.2 Beam arms on 110 hard problems (Oct 15–19) — formalization yes, accuracy no
+
+`beam_decode_v2.py --set hard`: the first 110 of the 131 level-4/5 MATH-500 problems
+(64 level 4, 46 level 5), `greedy` / `beam_lm` / `beam_forked_qwen3` with the §5.1 settings
+(beam 4 × 2, α = 1, mean aggregation; `tau_phi` from the held-out MATH-train trees as
+before). 4 h decode; **5,097 unique steps** in the two beam arms (hard solutions are
+2.5× longer), real-Lean labelled over three 48-h-capped jobs, 92 GPU-h in all;
+**20.5% proved**. Analysis as §5.2 / §5.3.
+
+| arm | acc | L4 | L5 | steps/sol | words/step | words/sol | final ≠ `beam_lm` | vs `beam_lm` (W/L, p) | vs `greedy` (W/L, p) |
+|---|---|---|---|---|---|---|---|---|---|
+| `greedy` | 0.255 | 0.328 | 0.152 | 16.6 | 12.0 | 199 | 105/110 | 10/24, **p = 0.02** | — |
+| `beam_lm` | **0.382** | 0.438 | 0.304 | 23.3 | 10.7 | 249 | — | — | 24/10, **p = 0.02** |
+| `beam_forked_qwen3` | 0.373 | 0.406 | 0.326 | 25.4 | 7.9 | 200 | 84/110 | 7/8, p = 1.0 | 22/9, **p = 0.03** |
+
+| formalization, paired per problem | `beam_lm` | `beam_forked_qwen3` | better / worse | sign p | Wilcoxon p |
+|---|---|---|---|---|---|
+| step rate (proved / steps) | 0.371 | 0.404 | 47 / 38 | 0.39 | **0.040** |
+| word share (words in proved steps) | 0.342 | 0.386 | 51 / 39 | 0.25 | **0.018** |
+| proved steps per solution | 4.56 | 6.01 | 48 / 31 | 0.07 | **0.003** |
+| correct | 0.382 | 0.373 | 7 / 8 | 1.0 | 0.80 |
+
+By level: word share +5 at level 4 (p = 0.03), +4 at level 5 (p = 0.18); accuracy 3/5 and
+4/3. Step AUC of the judges on these 5,097 steps: `forked_supervised_qwen3` **0.709** (0.730 on the
+`beam_lm` steps it did not pick, 0.696 on its own), old FaithformBench verifiability 0.553
+(0.511 / 0.599) — the Qwen3 judge transfers to hard, long, 20%-proved solutions as well as
+it did to the easy set (0.720, §8.2); the benchmark-trained one is back near chance.
+
+Reading:
+
+1. **Beam search is worth +13 accuracy points on hard problems** (greedy 0.255 →
+   `beam_lm` 0.382, p = 0.02) — twice its easy-set gain. The classifier arm keeps that
+   gain (0.373, p = 0.03 vs greedy) and adds nothing to it (7/8 vs `beam_lm`).
+2. **The judge's formalization gain, null on easy problems (§8.3), is significant on
+   hard ones** — word share +4.4 points (p = 0.018), proved steps +1.4 (p = 0.003) — at
+   unchanged accuracy and with 20% shorter solutions (200 vs 249 words). On hard problems
+   there is more unproved material for the judge to steer away from.
+3. **Trajectory-level selection and step-level steering part ways on hard problems.**
+   The same judge that picks the correct complete trajectory 7.5 points more often than
+   chance (§11.1) does not move accuracy when it steers the beam one step at a time. The
+   difference is the decision: choosing among 4 finished solutions with their final
+   answers in view (where the judge's mean score correlates +0.27 with the true Lean rate
+   and that correlates +0.35 with correctness) vs choosing among 8 partial continuations
+   that share most of their prefix. The mean-step-probability of a *complete* solution
+   is a usable correctness proxy on hard problems; a per-step logit inside the search is
+   not, at least at α = 1 with this calibration.
+
+So the hard-problem picture is: formalizability is coupled to correctness (§11.1
+ceiling), the judge sees it (AUC, pick gain), and the way to cash it in is to rerank
+complete solutions — which is also the cheap operation (score N finished solutions once)
+rather than the expensive one (score 8 candidates per step).
