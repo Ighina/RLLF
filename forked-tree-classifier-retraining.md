@@ -976,3 +976,74 @@ So the hard-problem picture is: formalizability is coupled to correctness (§11.
 ceiling), the judge sees it (AUC, pick gain), and the way to cash it in is to rerank
 complete solutions — which is also the cheap operation (score N finished solutions once)
 rather than the expensive one (score 8 candidates per step).
+
+## 12. Internal-state probes as the step judge (Oct 25)
+
+`~/LeanSteer` fits linear probes on the residual stream of the four FaithformBench
+autoformalizers that predict the benchmark's prover verdict for a step *before the model
+writes any Lean* (Goedel: proved 0.75, proved_strict 0.80, sycophancy 0.78 AUROC on the
+benchmark). Our real-Lean pipeline uses the same formalizer, Goedel-Formalizer-V2-8B, so a
+probe on its hidden state is a judge that reads the formalizer itself rather than a
+separate text classifier. Question: does it transfer to our generator's steps, and can it
+steer the constrained beam search?
+
+**Data.** Every real-Lean-labelled unique step of the project, 20,964 in all
+(`probe_build_steps.py`): forked trees 5,415 (standard 120/30 split), hard forked trees
+3,786, easy beam arms 5,149, hard beam arms 5,058, natural-CoT rerank cache 1,556. Goedel's
+residual stream at layers 0, 2, …, 36 and two anchors (`prompt_last`, `step_mean`) under two
+renderings of the step: **bare** (the benchmark's prompt around the step text — what the
+af_v1 probes were fit on) and **facts** (`render_step_claim` with the previous steps as
+hypotheses — the exact claim our pipeline formalized to produce the label). 0.8 GPU-h
+(`probe_collect.py`, LeanSteer's `HFBackend`); `probe/acts/`.
+
+### 12.1 Offline: AUC against our labels (`probe_eval.py`, `probe_eval2.py`)
+
+| judge | fit on | forked held | exp2 (easy beam) | hard beam | hard forked | natural CoT |
+|---|---|---|---|---|---|---|
+| af_v1 Goedel probe, proved, step_mean L36, **bare** | FaithformBench | 0.638 | 0.644 | 0.580 | 0.614 | 0.582 |
+| af_v1 Goedel probe, proved_strict, prompt_last L36, bare | FaithformBench | 0.633 | 0.529 | 0.522 | 0.626 | 0.557 |
+| af_v1 probes, any task/anchor, **facts** rendering | FaithformBench | 0.47–0.67 | 0.45–0.57 | 0.32–0.59 | 0.23–0.69 | 0.47–0.58 |
+| in-generator probe, bare, prompt_last L20 | forked fit (4,435) | 0.702 | 0.692 | 0.624 | 0.692 | 0.509 |
+| in-generator probe, facts, prompt_last L34 | forked fit | 0.677 | 0.667 | 0.692 | 0.737 | 0.606 |
+| **in-generator probe, facts, prompt_last + step_mean, L12+20+28+36** (val-selected) | forked fit | 0.699 | 0.707 | 0.692 | **0.778** | 0.583 |
+| in-generator probe, facts, prompt_last, L8+14+20+26+34 | forked fit | 0.704 | 0.683 | 0.704 | **0.831** | 0.670 |
+| external MiniLM `forked_supervised` (§7.4, §8.2) | forked fit | 0.692 | 0.631 | — | — | 0.572 |
+| external **Qwen3-1.7B** `forked_supervised_qwen3` (§8.2, §11) | forked fit | **0.753** | **0.720** | **0.709** | 0.742 | **0.654** |
+
+Reading:
+
+1. **The FaithformBench-trained probes do not transfer**, exactly like the FaithformBench
+   external classifiers (§10.2): 0.58–0.64 on the bare rendering, at or below chance on the
+   facts rendering (a prompt distribution they never saw). The "this step is provable"
+   direction LeanSteer found is specific to the benchmark's steps and prompt.
+2. **Refit on the generator's own Lean-labelled steps, the probe transfers** — 0.67–0.78
+   out of distribution — but it does not beat the external Qwen3-1.7B classifier trained on
+   the same 4,435 steps except on the hard forked trees (0.778 vs 0.742; 0.831 for a
+   variant that scored lower on validation). On easy MATH-500 steps it trails by 0.01–0.02,
+   on natural chain-of-thought by 0.05–0.07. Capacity of the read-out (a 32k-dimensional
+   linear probe on 3.7k rows, C = 0.05) and the fact that the probe reads *Goedel's*
+   state rather than a model fine-tuned on the task are the obvious reasons; a larger
+   training pool (forked + easy beam + natural CoT, ~11k rows) did not raise the hard-set
+   AUCs (0.70–0.71 / 0.80–0.81).
+3. **Rendering matters in the direction the labels predict.** Facts beats bare on every
+   out-of-distribution set except the easy beam steps; bare collapses on natural CoT
+   (0.51), whose steps lean on context the bare prompt removes. `prompt_last` (the state
+   from which Goedel starts writing) beats `step_mean` out of distribution.
+
+Full-trajectory rerank on the 60 hard forked trees with the selected probe (mean
+probability over the trajectory's steps; same protocol as §11.1): pick true rate 0.378 vs
+random 0.348, **+0.030 [+0.004, +0.057]**; pick accuracy 0.367 vs random 0.308,
+**+0.058 [−0.004, +0.121]** — the same direction as the Qwen3 classifier (+0.060 / +0.075),
+a shade smaller, the accuracy CI just touching zero.
+
+### 12.2 Probe-guided constrained beam search — running
+
+`rllf/policy/probe_policy.py::GoedelProbePolicy` wraps Goedel through LeanSteer's hooked
+backend and exposes `predict_step_probability` / `predict_step_logit_for_beam` so
+`lean_constrained_beam_search` takes it in place of an external classifier (one Goedel
+prefill per candidate step, ~50 per problem; `tests/test_probe_policy.py` checks the
+feature order against the offline fit). Arm `beam_probe_goedel`: the validation-selected
+probe above, α = 1, mean aggregation, `tau_phi` fitted on the 980 held-out tree steps
+(T = 7.30, b = 7.0 — the probe's logits are on a wider scale than the classifier's), on the
+easy 110 and the hard 110 problems, then real-Lean labels (`probe_beam_decode.py`,
+`launch_probe_beam.sh`). PROBE_DECODE_PLACEHOLDER
