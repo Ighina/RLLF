@@ -1066,4 +1066,45 @@ classifier, consistent with its lower offline AUC there (0.707 vs 0.720).
 
 **Hard 110 (levels 4–5):** decoded (accuracy 0.364 vs `beam_lm` 0.382, 6/8, p = 0.79; final
 answer changed on 83/110; 20.2 steps / 193 words per solution vs 23.3 / 249); real-Lean
-labels PROBE_HARD_PLACEHOLDER
+labels complete (6,928 labels in the hard arms, 20.0% proved; 5.6 GPU-h for the resumed pass):
+
+| hard 110, paired per problem | `beam_lm` | `beam_forked_qwen3` | `beam_probe_goedel` | probe vs `beam_lm` (W/L, sign p, Wilcoxon p) | probe vs Qwen3 arm |
+|---|---|---|---|---|---|
+| step rate | 0.371 | 0.404 | 0.403 | 50/37, 0.20, 0.12 | 39/44, p = 0.61 |
+| word share | 0.342 | 0.386 | 0.379 | 55/38, 0.10, **0.083** | 37/55, p = 0.29 |
+| proved steps / solution | 4.56 | 6.01 | 4.78 | 42/36, 0.57, 0.26 | 27/45, **p = 0.004** (shorter solutions) |
+| correct | 0.382 | 0.373 | 0.364 | 6/8, p = 0.79 | 6/7, p = 1.0 |
+
+By level the probe's word-share gain over `beam_lm` is +3.6 (level 4) and +3.9 points
+(level 5), neither significant; accuracy 1/5 at level 4, 5/3 at level 5.
+
+### 12.3 Reading
+
+1. **The internal probe reproduces the external classifier's effect on hard problems and
+   falls short of it on easy ones.** Hard: the same +3–4 points of formalization (word
+   share 0.379 vs the Qwen3 arm's 0.386, indistinguishable) at unchanged accuracy, with
+   22% shorter solutions. Easy: no formalization gain at all (word share 0.514 vs 0.543 for
+   the Qwen3 arm, p = 0.08) and a 5-point accuracy dip (n.s.). This tracks the offline AUCs
+   exactly (hard 0.69–0.78 vs 0.71–0.74; easy 0.707 vs 0.720).
+2. **As a judge, the formalizer's own state is usable but not privileged.** The hypothesis
+   was that Goedel's residual stream, read from the exact prompt it formalizes, would know
+   better than any external model what it is about to prove. On these data it knows about
+   as much as a 1.7B text classifier fine-tuned on the same 4,435 labels, and less than it
+   on steps far from the training distribution (natural chain-of-thought 0.58 vs 0.65). The
+   pre-generation state is "informative but far from decisive" in LeanSteer's own words;
+   the post-output state (0.86 there) would need a generation per candidate, i.e. most of
+   the cost of just running the Lean pipeline.
+3. **Nothing changes in the programme's conclusions.** Step-level steering — by an
+   external classifier, by an internal probe, at any α — does not move accuracy on either
+   difficulty band; real Lean in the loop raises verified content; trajectory-level
+   selection on hard problems is where a judge turns into answers, and the probe's rerank
+   gain there (+0.058 [−0.004, +0.121]) is the Qwen3 classifier's (+0.075 [+0.013, +0.138])
+   with a slightly wider margin of doubt.
+4. **What would make the probe worth more.** (a) Post-output anchors: one Goedel
+   generation per candidate (~200 tokens of thinking plus the statement) makes the verdict
+   far more readable (0.82–0.86 on the benchmark) — about 4× the prefill cost, still 20×
+   cheaper than a prover call; (b) a probe trained on more and harder in-generator labels
+   (the 20,964-step pool here is problem-disjoint from the hard sets only if fit on the
+   forked trees alone); (c) steering Goedel itself along the probe direction at
+   formalization time, which LeanSteer showed is causal for Kimina but not for Goedel.
+

@@ -1,6 +1,6 @@
 # RLLF — consolidated results and paper outline
 
-Status: Oct 19, 2026. One table per question, every number on the *corrected* footing
+Status: Oct 28, 2026 (probe experiment added, FT §12). One table per question, every number on the *corrected* footing
 (uncapped decoding, balanced-brace + sympy answer grading, step-level Lean rendering where
 it exists; legacy-rendering numbers are marked and carry the §9.4 binder correction). Detail
 and provenance: `experiments_v1.md` (§1–§11) and `forked-tree-classifier-retraining.md`
@@ -52,6 +52,7 @@ is worth +13 points on hard problems).
 | full-trajectory rerank, Qwen3 judge, hard forked trees | 60 L4–5 | random 0.348 | 0.408 | +0.060 [+0.032, +0.090] | FT §11.1 |
 | beam, forked Qwen3 judge α = 1, **hard problems** | 110 L4–5 | beam_lm 0.371 / 0.342 | **0.404 / 0.386** | **p = 0.04 / 0.018** | FT §11.2 |
 | beam, Goedel residual-stream probe as judge, easy | 110 L1–3 | 0.526 / 0.522 | 0.536 / 0.514 | p = 0.77 / 0.68 | FT §12.2 |
+| beam, Goedel residual-stream probe as judge, **hard** | 110 L4–5 | 0.371 / 0.342 | 0.403 / 0.379 | p = 0.12 / 0.083 (= Qwen3 arm's 0.404 / 0.386) | FT §12.2 |
 
 **Answer:** learned judges move real formalization by 2–3 points at most on easy problems
 (never significant on the granularity-robust word share); real Lean as a pruning oracle
