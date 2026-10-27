@@ -23,6 +23,7 @@ term (α = 1, mean aggregation); hybrid = beam with real Lean on the judge's uns
 | beam, forked **Qwen3** judge, α = 1 | step-native Qwen2.5-7B | 110 (L1–3) | beam_lm 0.655 | 0.627 | 8/11, p = 0.65 | FT §8.3 |
 | beam, forked Qwen3 judge, α = 4 / 10 / 30 | step-native Qwen2.5-7B | 110 (L1–3) | beam_lm 0.655 | 0.564 / 0.582 / 0.555 | 8/18 p = 0.08; 14/22; 13/24 p = 0.10 | FT §8.6 — stronger steering *hurts* |
 | **hybrid**: beam + real Lean on unsure steps (budget 24) | step-native Qwen2.5-7B | 110 (L1–3) | beam_lm 0.655 | **0.655** | 11/11 | FT §10.1 |
+| beam, **Goedel residual-stream probe** as judge (α = 1) | step-native Qwen2.5-7B | 110 (L1–3) / 110 (L4–5) | beam_lm 0.655 / 0.382 | 0.600 / 0.364 | 9/15, p = 0.31 / 6/8, p = 0.79 | FT §12.2 |
 | full-trajectory rerank, forked Qwen3 judge (10 natural CoT trajectories) | Qwen2.5-7B | 15 (L1–3) | random pick 0.753 | 0.667 | −0.087 [−0.23, +0.05] | FT §8.4 |
 | full-trajectory rerank, forked Qwen3 judge (4 forked trajectories) | step-native Qwen2.5-7B | 30 held-out MATH-train trees | random 0.275 | 0.267 | ≈ 0 | FT §8.1 |
 | **full-trajectory rerank, forked Qwen3 judge** | step-native Qwen2.5-7B | **60 MATH-500 L4–5** | random 0.308 (oracle 0.467) | **0.383** | **+0.075 [+0.013, +0.138]** | FT §11.1 |
@@ -50,6 +51,7 @@ is worth +13 points on hard problems).
 | full-trajectory rerank, Qwen3 judge, natural CoT | 15 L1–3 | random 0.606 | 0.683 | +0.076 [+0.013, +0.138] | FT §8.4 |
 | full-trajectory rerank, Qwen3 judge, hard forked trees | 60 L4–5 | random 0.348 | 0.408 | +0.060 [+0.032, +0.090] | FT §11.1 |
 | beam, forked Qwen3 judge α = 1, **hard problems** | 110 L4–5 | beam_lm 0.371 / 0.342 | **0.404 / 0.386** | **p = 0.04 / 0.018** | FT §11.2 |
+| beam, Goedel residual-stream probe as judge, easy | 110 L1–3 | 0.526 / 0.522 | 0.536 / 0.514 | p = 0.77 / 0.68 | FT §12.2 |
 
 **Answer:** learned judges move real formalization by 2–3 points at most on easy problems
 (never significant on the granularity-robust word share); real Lean as a pruning oracle
@@ -67,6 +69,7 @@ selection moves it by +6–8 points with CIs excluding zero.
 | The labels themselves depend on how the step is phrased for the autoformalizer | problem-in-view rendering formalized the *problem* for ~35% of steps; step-level rendering flips 33% of verdicts (66.6% agreement, proved 0.51 → 0.58) | §9.2, FT §4.1 |
 | Binder statements were silently dropped by the pipeline | 607 steps (10–17% of every legacy cache) never reached the prover; 40.5% prove once they do; no arm ordering changes | FT §7.2, §9.4 |
 | Step-capped decoding zeroes a large share of every arm | `max_steps=6`: 19–52% of trajectories end with an empty answer, unevenly across arms | §9 |
+| The formalizer's own residual stream is a usable but not better judge | FaithformBench-trained Goedel probes 0.58–0.64 on our steps (chance under the pipeline's rendering); probes refit on the generator's 4,435 labelled steps 0.67–0.78 OOD, = Qwen3 classifier on hard trees (0.778 vs 0.742), below it elsewhere (0.707 vs 0.720 easy; 0.583 vs 0.654 natural CoT) |
 | Stronger steering saturates on formalization and trades accuracy | α 1 → 4 → 30: word share +2 → +2 → —, accuracy −3 → −9 → −10 points | FT §8.6 |
 
 ## D. Paper

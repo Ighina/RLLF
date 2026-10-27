@@ -1046,4 +1046,24 @@ feature order against the offline fit). Arm `beam_probe_goedel`: the validation-
 probe above, α = 1, mean aggregation, `tau_phi` fitted on the 980 held-out tree steps
 (T = 7.30, b = 7.0 — the probe's logits are on a wider scale than the classifier's), on the
 easy 110 and the hard 110 problems, then real-Lean labels (`probe_beam_decode.py`,
-`launch_probe_beam.sh`). PROBE_DECODE_PLACEHOLDER
+`launch_probe_beam.sh`). Decode 25 s / ~50 probe calls per easy problem; both sets decoded in
+one job (48 GPU-h including the easy-set labels and most of the hard-set labels; hard-set
+labelling resumed in a second job).
+
+**Easy 110 (levels 1–3), all labelled:**
+
+| arm | acc | acc vs `beam_lm` (W/L, p) | steps/sol | words/sol | step rate | word share | proved steps |
+|---|---|---|---|---|---|---|---|
+| `beam_lm` | 0.655 | — | 9.3 | 108 | 0.526 | 0.522 | 4.26 |
+| `beam_forked_qwen3` (external judge) | 0.627 | 8/11, p = 0.65 | 9.3 | 84 | 0.557 | 0.543 | 4.76 |
+| `beam_probe_goedel` (internal probe) | 0.600 | 9/15, p = 0.31 | 10.4 | 92 | 0.536 (p = 0.77) | 0.514 (p = 0.68) | 4.86 (p = 0.10) |
+
+Paired vs the external Qwen3 arm: word share 39/51, Wilcoxon p = 0.076 (lower); step rate
+p = 0.28; correct 9/12. The probe changes the final answer on 65/110 problems — it steers —
+but toward steps that prove no more often than the search's own, at a 5-point accuracy
+cost (n.s.). On easy problems the internal read-out is a weaker judge than the external
+classifier, consistent with its lower offline AUC there (0.707 vs 0.720).
+
+**Hard 110 (levels 4–5):** decoded (accuracy 0.364 vs `beam_lm` 0.382, 6/8, p = 0.79; final
+answer changed on 83/110; 20.2 steps / 193 words per solution vs 23.3 / 249); real-Lean
+labels PROBE_HARD_PLACEHOLDER
