@@ -1108,3 +1108,54 @@ By level the probe's word-share gain over `beam_lm` is +3.6 (level 4) and +3.9 p
    forked trees alone); (c) steering Goedel itself along the probe direction at
    formalization time, which LeanSteer showed is causal for Kimina but not for Goedel.
 
+### 12.4 Attention-head probes (Oct 28)
+
+LeanSteer's second probe family reads the per-head attention outputs (the input of each
+block's `o_proj`, 32 heads × 128 for Goedel) instead of the residual stream, and on
+FaithformBench concatenating the 4–64 best heads beats the residual probe by 0.05–0.11
+(Goedel proved 0.80 vs 0.74, proved_strict 0.86 vs 0.77, sycophancy 0.84 vs 0.78). Same
+collection as §12 but `component="heads"`, all 36 layers (`probe_collect_heads.py`, 0.8 GPU-h,
+24 GB); `GoedelProbePolicy` extended to head slices (`component=heads`, tested).
+
+**A. FaithformBench-selected and -trained head probes, zero-shot** (LeanSteer saved the head
+ranking but not the coefficients, so the top-k read-outs were refit on the benchmark's own head
+store, prompt_last, bare rendering; `probe_eval_heads.py`):
+
+| task, k heads | benchmark test | forked held | exp2 | hard beam | hard forked | natural CoT |
+|---|---|---|---|---|---|---|
+| proved, top-4 (L36H8, L36H9, L23H15, L36H12) | 0.802 | **0.697** | **0.660** | 0.621 | **0.759** | 0.591 |
+| proved, top-16 | 0.805 | 0.664 | 0.624 | 0.598 | 0.705 | 0.579 |
+| proved_strict, top-16 | 0.860 | 0.709 | 0.613 | 0.561 | 0.646 | 0.540 |
+| sycophancy, top-4 | 0.820 | 0.659 | 0.588 | 0.598 | 0.730 | 0.577 |
+| (residual af_v1 probes, §12.1) | 0.74–0.80 | 0.63–0.64 | 0.53–0.64 | 0.52–0.58 | 0.61–0.63 | 0.56–0.58 |
+
+Four benchmark-selected heads transfer to our steps **better than any benchmark-trained
+residual probe** (0.70 / 0.66 / 0.76 vs 0.64 / 0.64 / 0.61 on held / easy / hard trees) — the
+only FaithformBench-trained judge in the project that is clearly above chance out of
+distribution. More heads transfer worse: the benchmark-specific part grows with k.
+
+**B. In-generator head probes** (`probe_eval_heads.py` B): selecting heads on our own 699-row
+validation fifth overfits — 1,129 of 1,152 heads clear 0.6 there, validation AUC of the
+top-64 reaches 0.82, and the chosen probe scores 0.59 on the hard sets. **Benchmark-selected
+heads, read-out refit on our steps** (`probe_eval_heads2.py`) removes the selection problem:
+
+| heads (prompt_last ranking) | rendering / anchor | val | forked held | exp2 | hard beam | hard forked | natural CoT |
+|---|---|---|---|---|---|---|---|
+| **proved_strict top-64** (selected by validation) | facts / prompt_last | 0.761 | 0.707 | 0.697 | 0.686 | 0.771 | 0.586 |
+| proved top-16 | facts / prompt_last | 0.734 | 0.712 | 0.716 | 0.692 | 0.806 | 0.609 |
+| sycophancy top-64 | facts / prompt_last | 0.748 | 0.696 | 0.708 | 0.740 | 0.815 | 0.533 |
+| proved_strict top-4 | bare / prompt_last | 0.715 | 0.667 | 0.654 | 0.677 | **0.831** | 0.542 |
+| residual multi-layer probe (§12.1) | facts | 0.764 | 0.699 | 0.707 | 0.692 | 0.778 | 0.583 |
+| external Qwen3-1.7B classifier | — | — | **0.753** | **0.720** | 0.709 | 0.742 | **0.654** |
+
+Reading: on our data the head probes are **as good as the residual probe, not better** — the
+0.05–0.11 head advantage LeanSteer measured on FaithformBench does not reappear (0.70 / 0.70 /
+0.69 / 0.77 vs 0.70 / 0.71 / 0.69 / 0.78). Several head sets do beat every other judge on the
+hard sets (sycophancy top-64 0.740 / 0.815; proved_strict top-4 0.831 on hard trees), but the
+validation set (MATH-train trees) cannot see that, and picking them post hoc would be
+selection on the test set. Hard-forked rerank with the validation-selected head probe: pick
+true rate +0.010 [−0.024, +0.043], accuracy +0.042 [−0.042, +0.125] — weaker than the
+residual probe and the Qwen3 classifier.
+
+**C. Head-probe-guided beam search** — arm `beam_heads_goedel` with the validation-selected
+head probe, same protocol as §12.2. HEADS_DECODE_PLACEHOLDER
