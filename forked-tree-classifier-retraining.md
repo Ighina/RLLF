@@ -5,8 +5,8 @@ accuracy** (§5.1–5.3); **`full_trajectory_rerank` plug-in done — null on th
 encoder refit done (§8) — a much better step judge (AUC 0.72 OOD), still no accuracy or
 significant formalization gain on easy problems.** α sweep (§8.6), refutation probe (§9),
 **Lean-in-the-loop (§10.1: +6 pts verified content, accuracy unchanged)** and **hard-problem
-rerank (§11.1: first accuracy gain, +0.075 [+0.013, +0.138])** done; hard beam arms (§11.2)
-labelling.
+rerank (§11.1: first accuracy gain, +0.075 [+0.013, +0.138])** done; hard beam arms (§11.2) done;
+**internal-state probes as judges (§12: residual and attention-head) done — usable, not better.**
 
 ## 1. Why
 
@@ -1158,4 +1158,59 @@ true rate +0.010 [−0.024, +0.043], accuracy +0.042 [−0.042, +0.125] — weak
 residual probe and the Qwen3 classifier.
 
 **C. Head-probe-guided beam search** — arm `beam_heads_goedel` with the validation-selected
-head probe, same protocol as §12.2. HEADS_DECODE_PLACEHOLDER
+head probe, same protocol as §12.2 (`tau_phi` T = 6.40, b = 5.84 on the held-out tree steps;
+~50 probe calls per problem; 43 GPU-h for decode + labels of both sets).
+
+| set / arm | acc | acc vs `beam_lm` (W/L, p) | steps/sol | words/sol | step rate | word share | proved steps |
+|---|---|---|---|---|---|---|---|
+| easy `beam_lm` | 0.655 | — | 9.3 | 108 | 0.526 | 0.522 | 4.26 |
+| easy `beam_forked_qwen3` | 0.627 | 8/11 | 9.3 | 84 | 0.557 | 0.543 | 4.76 |
+| easy `beam_probe_goedel` (residual) | 0.600 | 9/15 | 10.4 | 92 | 0.536 | 0.514 | 4.86 |
+| easy **`beam_heads_goedel`** | 0.627 | 7/10, p = 0.63 | 12.0 | — | 0.539 (p = 0.54) | 0.518 (p = 0.91) | 5.37 (p = 0.58) |
+| hard `beam_lm` | 0.382 | — | 23.3 | 249 | 0.371 | 0.342 | 4.56 |
+| hard `beam_forked_qwen3` | 0.373 | 7/8 | 25.4 | 200 | 0.404 | 0.386 | 6.01 |
+| hard `beam_probe_goedel` (residual) | 0.364 | 6/8 | 20.2 | 193 | 0.403 | 0.379 | 4.78 |
+| hard **`beam_heads_goedel`** | 0.355 | 9/12, p = 0.66 | 21.3 | 195 | 0.389 (p = 0.27) | 0.368 (p = 0.17) | 4.38 (p = 0.41) |
+
+Paired against the residual-probe arm the head arm differs on nothing (easy: word share 44/42,
+p = 0.96; hard: 44/54, p = 0.55; correct 13/10 and 12/13). Against the Qwen3 arm on hard
+problems: equal step rate and word share (46/46, 50/49), fewer proved steps because of
+shorter solutions (p = 0.002), correct 10/12.
+
+### 12.5 Reading — internal probes as beam judges
+
+Three judges built from Goedel's own state have now steered the search — a FaithformBench
+residual probe (not run: at chance offline), an in-generator residual probe (§12.2) and an
+in-generator head probe with benchmark-selected heads (§12.4) — next to the external
+MiniLM and Qwen3 classifiers. The outcome table is flat:
+
+| judge, beam α = 1 | offline AUC (easy / hard beam steps) | easy acc | easy word share | hard acc | hard word share |
+|---|---|---|---|---|---|
+| none (`beam_lm`) | — | 0.655 | 0.522 | 0.382 | 0.342 |
+| external Qwen3-1.7B | 0.720 / 0.709 | 0.627 | 0.543 | 0.373 | **0.386** (p = 0.018) |
+| residual probe, 4 layers × 2 anchors | 0.707 / 0.692 | 0.600 | 0.514 | 0.364 | 0.379 (p = 0.083) |
+| head probe, 64 benchmark heads | 0.697 / 0.686 | 0.627 | 0.518 | 0.355 | 0.368 (p = 0.17) |
+
+1. **No judge moves accuracy; every judge moves hard-problem formalization by roughly its
+   AUC margin over chance.** The three formalization gains on hard problems (+4.4, +3.7, +2.6
+   points of word share) order exactly as the judges' hard-step AUCs (0.709, 0.692, 0.686).
+   What a beam judge buys here is a property of how well it ranks steps, not of where it
+   reads them from.
+2. **Reading the formalizer's internals buys no information the step text does not carry.**
+   On FaithformBench the heads beat the residual stream by 0.05–0.11 and the residual stream
+   beat text baselines by 0.1–0.2; on this generator's steps, with labels from the exact
+   prompt the probes read, head ≈ residual ≈ a fine-tuned 1.7B text classifier (±0.02), and
+   all three trail the classifier on natural chain-of-thought. The one genuine advantage of
+   the internal read-out is **zero-shot transfer of the head *selection***: four
+   benchmark-chosen heads carry 0.70 / 0.76 to our easy / hard steps where every
+   benchmark-trained classifier and residual probe carried ≈ 0.6.
+3. **Cost.** A probe call is one Goedel prefill (8B, ~400 tokens): ~5× the Qwen3 classifier's
+   forward pass, ~1/20 of a real Lean call. It is the cheapest way to get a 0.70-AUC judge
+   *without training anything but a logistic regression* — the practical case for probes is
+   label efficiency, not accuracy.
+
+Programme conclusion unchanged: step-level steering by any judge leaves accuracy where the
+search puts it; Lean in the loop raises verified content; trajectory-level reranking on hard
+problems is where a judge becomes answers, and there the external Qwen3 classifier
+(+0.075 [+0.013, +0.138]) remains ahead of the residual (+0.058) and head (+0.042) probes.
+

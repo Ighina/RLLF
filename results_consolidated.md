@@ -1,6 +1,6 @@
 # RLLF — consolidated results and paper outline
 
-Status: Oct 28, 2026 (probe experiment added, FT §12). One table per question, every number on the *corrected* footing
+Status: Oct 30, 2026 (residual and attention-head probe experiments added, FT §12). One table per question, every number on the *corrected* footing
 (uncapped decoding, balanced-brace + sympy answer grading, step-level Lean rendering where
 it exists; legacy-rendering numbers are marked and carry the §9.4 binder correction). Detail
 and provenance: `experiments_v1.md` (§1–§11) and `forked-tree-classifier-retraining.md`
@@ -24,6 +24,7 @@ term (α = 1, mean aggregation); hybrid = beam with real Lean on the judge's uns
 | beam, forked Qwen3 judge, α = 4 / 10 / 30 | step-native Qwen2.5-7B | 110 (L1–3) | beam_lm 0.655 | 0.564 / 0.582 / 0.555 | 8/18 p = 0.08; 14/22; 13/24 p = 0.10 | FT §8.6 — stronger steering *hurts* |
 | **hybrid**: beam + real Lean on unsure steps (budget 24) | step-native Qwen2.5-7B | 110 (L1–3) | beam_lm 0.655 | **0.655** | 11/11 | FT §10.1 |
 | beam, **Goedel residual-stream probe** as judge (α = 1) | step-native Qwen2.5-7B | 110 (L1–3) / 110 (L4–5) | beam_lm 0.655 / 0.382 | 0.600 / 0.364 | 9/15, p = 0.31 / 6/8, p = 0.79 | FT §12.2 |
+| beam, **Goedel attention-head probe** (64 benchmark-selected heads) as judge | step-native Qwen2.5-7B | 110 (L1–3) / 110 (L4–5) | beam_lm 0.655 / 0.382 | 0.627 / 0.355 | 7/10, p = 0.63 / 9/12, p = 0.66 | FT §12.4 |
 | full-trajectory rerank, forked Qwen3 judge (10 natural CoT trajectories) | Qwen2.5-7B | 15 (L1–3) | random pick 0.753 | 0.667 | −0.087 [−0.23, +0.05] | FT §8.4 |
 | full-trajectory rerank, forked Qwen3 judge (4 forked trajectories) | step-native Qwen2.5-7B | 30 held-out MATH-train trees | random 0.275 | 0.267 | ≈ 0 | FT §8.1 |
 | **full-trajectory rerank, forked Qwen3 judge** | step-native Qwen2.5-7B | **60 MATH-500 L4–5** | random 0.308 (oracle 0.467) | **0.383** | **+0.075 [+0.013, +0.138]** | FT §11.1 |
@@ -53,6 +54,7 @@ is worth +13 points on hard problems).
 | beam, forked Qwen3 judge α = 1, **hard problems** | 110 L4–5 | beam_lm 0.371 / 0.342 | **0.404 / 0.386** | **p = 0.04 / 0.018** | FT §11.2 |
 | beam, Goedel residual-stream probe as judge, easy | 110 L1–3 | 0.526 / 0.522 | 0.536 / 0.514 | p = 0.77 / 0.68 | FT §12.2 |
 | beam, Goedel residual-stream probe as judge, **hard** | 110 L4–5 | 0.371 / 0.342 | 0.403 / 0.379 | p = 0.12 / 0.083 (= Qwen3 arm's 0.404 / 0.386) | FT §12.2 |
+| beam, Goedel attention-head probe as judge, easy / hard | 110 / 110 | 0.526 / 0.522 ; 0.371 / 0.342 | 0.539 / 0.518 ; 0.389 / 0.368 | n.s. ; p = 0.27 / 0.17 | FT §12.4 |
 
 **Answer:** learned judges move real formalization by 2–3 points at most on easy problems
 (never significant on the granularity-robust word share); real Lean as a pruning oracle
@@ -70,7 +72,7 @@ selection moves it by +6–8 points with CIs excluding zero.
 | The labels themselves depend on how the step is phrased for the autoformalizer | problem-in-view rendering formalized the *problem* for ~35% of steps; step-level rendering flips 33% of verdicts (66.6% agreement, proved 0.51 → 0.58) | §9.2, FT §4.1 |
 | Binder statements were silently dropped by the pipeline | 607 steps (10–17% of every legacy cache) never reached the prover; 40.5% prove once they do; no arm ordering changes | FT §7.2, §9.4 |
 | Step-capped decoding zeroes a large share of every arm | `max_steps=6`: 19–52% of trajectories end with an empty answer, unevenly across arms | §9 |
-| The formalizer's own residual stream is a usable but not better judge | FaithformBench-trained Goedel probes 0.58–0.64 on our steps (chance under the pipeline's rendering); probes refit on the generator's 4,435 labelled steps 0.67–0.78 OOD, = Qwen3 classifier on hard trees (0.778 vs 0.742), below it elsewhere (0.707 vs 0.720 easy; 0.583 vs 0.654 natural CoT) |
+| The formalizer's own residual stream — and its attention heads — are usable but not better judges | FaithformBench-trained Goedel probes 0.58–0.64 on our steps (chance under the pipeline's rendering); probes refit on the generator's 4,435 labelled steps 0.67–0.78 OOD, = Qwen3 classifier on hard trees (0.778 vs 0.742), below it elsewhere (0.707 vs 0.720 easy; 0.583 vs 0.654 natural CoT); head probes with benchmark-selected heads = residual probe (±0.01); the head *selection* is the one FaithformBench artefact that transfers zero-shot (4 heads: 0.70 / 0.76 on easy / hard steps vs ≈ 0.6 for every benchmark-trained classifier) |
 | Stronger steering saturates on formalization and trades accuracy | α 1 → 4 → 30: word share +2 → +2 → —, accuracy −3 → −9 → −10 points | FT §8.6 |
 
 ## D. Paper
