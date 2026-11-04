@@ -1275,3 +1275,27 @@ what trajectory selection needs and what Lean's "not proved" does not provide. C
 the full run lands: the sycophancy control (300 number-perturbed steps) is not yet generated,
 so how often the checker rubber-stamps a false claim is unknown; the numbers are from the
 30B fallback model on a third of the steps.
+
+### 13.2 Python verifiability is more readable from internal state than Lean verifiability
+
+Probes on the stored activations (forked fit split, standard recipe; `probe_eval_python.py`),
+target = the Python verdict, with the Lean target alongside on the same rows:
+
+| features | target | val | forked held | hard trees (partial) |
+|---|---|---|---|---|
+| generator state (step_last + step_mean, L12+18+24) | **python verified** | **0.802** | **0.781** | 0.796 |
+| generator state | python refuted | 0.732 | 0.685 | 0.599 |
+| generator state | lean proved | 0.700 | 0.701 | 0.665 |
+| Goedel residual (facts, 4 layers × 2 anchors) | python verified | 0.738 | 0.717 | 0.805 |
+| Goedel residual | lean proved | 0.764 | 0.703 | 0.830 |
+| Goedel heads (benchmark proved_strict top-64) | python verified | 0.759 | 0.692 | **0.876** |
+| Goedel heads | python refuted | 0.694 | 0.652 | 0.816 |
+| cross-target: Lean-trained probe → Python labels (generator / Goedel residual / heads) | | | 0.68 / 0.67 / 0.67 | 0.64 / 0.77 / 0.82 |
+| cross-target: Python-trained probe → Lean labels | | | 0.69 / 0.65 / 0.66 | 0.75 / 0.75 / 0.86 |
+
+**The generator knows whether its step will check out in Python** (0.78 held-out, 0.80 on hard
+problems) far better than whether it will prove in Lean (0.70 / 0.67) — the first probe target on
+which the model that wrote the step beats the formalizer's state. Refutation is less readable
+(0.69 / 0.60). The Python and Lean targets share most of a direction (cross-target 0.65–0.86), as
+expected for two readings of "is this step right". (The hard-tree column is on the 1,753 steps
+done so far and is inflated by that set's many wrong steps; re-read at full data.)
