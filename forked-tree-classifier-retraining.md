@@ -1214,3 +1214,64 @@ search puts it; Lean in the loop raises verified content; trajectory-level reran
 problems is where a judge becomes answers, and there the external Qwen3 classifier
 (+0.075 [+0.013, +0.138]) remains ahead of the residual (+0.058) and head (+0.042) probes.
 
+### 12.6 The generator's own state as a Lean judge (Nov 1)
+
+Same recipe on the *step-native generator's* residual stream (Qwen2.5-7B SFT, teacher-forced on
+the step: anchors `step_last` / `step_mean`, layers 0–28; `probe_collect_generator.py`, 0.6 GPU-h;
+`probe_eval_gen.py`). Held-out trees 0.66–0.72 at the best layers, but out of distribution
+0.55–0.67 (easy beam), 0.54–0.67 (hard beam), 0.57–0.73 (hard trees), 0.45–0.61 (natural CoT);
+the validation-selected variant (`step_mean` L8) is among the worst OOD (0.55–0.59). The
+formalizer's state (§12.1: 0.69–0.78) and the external classifier (0.65–0.75) both read Lean
+verifiability better than the model that wrote the step does. Closed: the generator is not
+where the Lean signal lives.
+
+## 13. A weak verifier: Python-synthesised checks (Nov 2026, in progress)
+
+**Motivation.** Lean formalization pays off only where provability tracks correctness (§11),
+and most steps of a MATH solution are arithmetic or symbolic manipulations that a few lines of
+Python / sympy can check directly — including *refuting* them, which the Lean pipeline almost
+never does (§9: 2.3% of failures refutable). Plan: (1) a code model writes K = 4 independent
+check programs per labelled step; sandboxed execution; aggregated verdict verified / refuted /
+uncheckable / unknown; agreement with Lean and a number-perturbed sycophancy control; (2)
+external classifiers and internal probes for *Python* verifiability; (3) a router python / lean /
+none and a routed-verifier hybrid beam search; (4) SFT of the base model on verifiability-selected
+trajectories in a JSON `[{step, verifier}]` format (MATH-train only). Scripts
+`pyverify_generate.py` (vLLM; Qwen3-Coder-Next on two cards, Qwen3-30B-A3B-Instruct-2507 on one as
+the fallback), `pyverify_execute.py` (import blacklist, `python -I`, 10 s CPU / 4 GB, verdict
+line `VERDICT: TRUE|FALSE|UNCHECKABLE`); outputs under `pyverify*/`.
+
+### 13.1 First 7,168 steps (Qwen3-30B-A3B fallback; the full run is queued)
+
+Program outcomes over 28,672 programs: TRUE 31%, FALSE 27%, no verdict line 15%, runtime
+error 19%, no code block 6%, timeout 2%, UNCHECKABLE 0.3% — the model almost never declares a
+step uncheckable and a third of steps end "unknown" through program failure; program quality
+is the first thing to improve. Aggregated verdicts (majority of ≥ 2 agreeing samples):
+
+| set | n | verified | refuted | unknown | Lean proved | P(verified \| Lean) | P(verified \| ¬Lean) | P(Lean \| verified) | P(Lean \| refuted) |
+|---|---|---|---|---|---|---|---|---|---|
+| MATH-train trees (all) | 5,415 | 0.387 | 0.270 | 0.341 | 0.276 | 0.614 | 0.300 | 0.438 | 0.170 |
+| hard trees (partial) | 1,753 | 0.205 | 0.408 | 0.386 | 0.128 | 0.589 | 0.148 | 0.368 | 0.032 |
+
+**The weak verifier separates correct from wrong reasoning far better than Lean does.** Steps
+that occur only in correct trajectories vs only in wrong ones:
+
+| set | steps only in correct trajectories: verified / refuted / Lean proved | steps only in wrong trajectories: verified / refuted / Lean proved |
+|---|---|---|
+| MATH-train trees | 0.652 / **0.109** / 0.429 (n = 945) | 0.319 / **0.316** / 0.232 (n = 4,114) |
+| hard trees | 0.695 / **0.065** / 0.390 (n = 154) | 0.145 / **0.450** / 0.093 (n = 1,562) |
+
+And as a trajectory-selection oracle on the 150 MATH-train trees (pick the trajectory with the
+best score; the §5.4 protocol):
+
+| oracle score | pick acc | random | oracle | gain [95% CI] | within-problem ρ |
+|---|---|---|---|---|---|
+| Lean proved rate | 0.373 | 0.318 | 0.547 | +0.055 [+0.005, +0.107] | +0.25 |
+| Python verified rate | 0.380 | 0.318 | 0.547 | +0.062 [+0.013, +0.110] | +0.29 |
+| Python verified − refuted | 0.407 | 0.318 | 0.547 | **+0.088 [+0.035, +0.140]** | +0.39 |
+| fewest Python refutations | **0.413** | 0.318 | 0.547 | **+0.095 [+0.040, +0.148]** | **+0.44** |
+
+The extra signal is refutation: a Python check can say a step is *wrong*, which is exactly
+what trajectory selection needs and what Lean's "not proved" does not provide. Caveats until
+the full run lands: the sycophancy control (300 number-perturbed steps) is not yet generated,
+so how often the checker rubber-stamps a false claim is unknown; the numbers are from the
+30B fallback model on a third of the steps.
