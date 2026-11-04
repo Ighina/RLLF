@@ -1299,3 +1299,31 @@ which the model that wrote the step beats the formalizer's state. Refutation is 
 (0.69 / 0.60). The Python and Lean targets share most of a direction (cross-target 0.65–0.86), as
 expected for two readings of "is this step right". (The hard-tree column is on the 1,753 steps
 done so far and is inflated by that set's many wrong steps; re-read at full data.)
+
+### 13.3 Routing between verifiers (first version, forked trees)
+
+Heuristic label per step — python if the Python check verified it, lean if not but Lean proved it,
+none otherwise — is 38 / 12 / 50 % on the fit split, 40 / 7 / 53 % held out and 20 / 5 / 74 % on
+hard trees. A flat three-way router (`router_eval.py`) learns mostly to say "none": the
+generator-state router reaches 0.63 / 0.67 accuracy (majority baselines 0.53 / 0.74) and *verifies
+fewer steps than always running Python* (0.30 vs 0.40 held out), because it under-routes to the
+cheap verifier. The economics make the flat formulation wrong: always-Python already reaches 0.40
+of the oracle's 0.47 (held) and 0.21 of 0.26 (hard) at negligible cost, and Lean's whole added
+value is the 5–7 % of steps Python misses but Lean proves, at ~20× the cost per call.
+
+**Two-stage, cost-aware router** (`router_eval2.py`): run Python on every step; among the steps it
+did not verify, a probe predicts "Lean would prove this" and only the top b % of all steps go to
+Lean. Fit on 2,733 python-unverified fit steps (18.7 % Lean-provable):
+
+| stage-2 probe | set | AUC (lean \| ¬python) | verified share: Python only → +Lean on 5 % / 10 % / 20 % / 30 % of steps | oracle | precision of the 10 % sent |
+|---|---|---|---|---|---|
+| Goedel residual (facts) | held | 0.646 | 0.402 → 0.415 / 0.423 / 0.437 / 0.449 | 0.469 | 0.21 (random 0.11) |
+| Goedel residual (facts) | hard trees | **0.811** | 0.205 → 0.224 / **0.234** / 0.243 / 0.246 | 0.257 | **0.29** (random 0.07) |
+| generator state | held | 0.652 | 0.402 → 0.418 / 0.426 / 0.438 / 0.449 | 0.469 | 0.23 |
+| generator state | hard trees | 0.653 | 0.205 → 0.215 / 0.221 / 0.228 / 0.234 | 0.257 | 0.17 |
+
+Reading: routing works where it matters most. On hard problems the formalizer's state tells
+which Python-unverified steps Lean can close (AUC 0.81): sending 10 % of steps to Lean recovers
++2.9 of the 5.2 points between Python-only and the oracle, four times what random routing would
+(0.7). On easy problems the signal is weaker (0.65) and the Lean margin smaller. The probe is
+saved as `probe/probes/router_lean_given_nopython.npz` for the routed decode (§13.5).
