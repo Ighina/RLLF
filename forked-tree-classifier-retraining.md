@@ -1291,27 +1291,29 @@ of "fewest refutations" (+0.44) is the highest of any score measured in this pro
 
 ### 13.2 Python verifiability is more readable from internal state than Lean verifiability
 
-Probes on the stored activations (forked fit split, standard recipe; `probe_eval_python.py`),
-target = the Python verdict, with the Lean target alongside on the same rows:
+Probes on the stored activations (forked fit split, standard recipe; `probe_eval_python.py`), target =
+the Python verdict, with the Lean target alongside on the same rows (full data, every set):
 
-| features | target | val | forked held | hard trees (partial) |
-|---|---|---|---|---|
-| generator state (step_last + step_mean, L12+18+24) | **python verified** | **0.802** | **0.781** | 0.796 |
-| generator state | python refuted | 0.732 | 0.685 | 0.599 |
-| generator state | lean proved | 0.700 | 0.701 | 0.665 |
-| Goedel residual (facts, 4 layers × 2 anchors) | python verified | 0.738 | 0.717 | 0.805 |
-| Goedel residual | lean proved | 0.764 | 0.703 | 0.830 |
-| Goedel heads (benchmark proved_strict top-64) | python verified | 0.759 | 0.692 | **0.876** |
-| Goedel heads | python refuted | 0.694 | 0.652 | 0.816 |
-| cross-target: Lean-trained probe → Python labels (generator / Goedel residual / heads) | | | 0.68 / 0.67 / 0.67 | 0.64 / 0.77 / 0.82 |
-| cross-target: Python-trained probe → Lean labels | | | 0.69 / 0.65 / 0.66 | 0.75 / 0.75 / 0.86 |
+| features | target | val | forked held | hard trees | easy beam | hard beam | natural CoT |
+|---|---|---|---|---|---|---|---|
+| **generator state** (step_last + step_mean, L12+18+24) | **python verified** | **0.802** | **0.781** | 0.722 | **0.715** | 0.675 | **0.713** |
+| generator state | python refuted | 0.733 | 0.685 | 0.622 | 0.716 | 0.621 | 0.677 |
+| generator state | lean proved | 0.700 | 0.701 | 0.686 | 0.649 | 0.643 | 0.600 |
+| Goedel residual (facts, 4 layers × 2 anchors) | python verified | 0.737 | 0.717 | **0.757** | 0.690 | **0.790** | 0.657 |
+| Goedel residual | python refuted | 0.637 | 0.666 | 0.727 | **0.789** | 0.705 | 0.591 |
+| Goedel residual | lean proved | 0.764 | 0.703 | 0.786 | 0.702 | 0.691 | 0.551 |
+| Goedel heads (benchmark proved_strict top-64) | python verified | 0.759 | 0.692 | 0.771 | 0.676 | 0.771 | 0.677 |
+| Goedel heads | python refuted | 0.694 | 0.652 | 0.736 | 0.772 | 0.764 | 0.672 |
+| cross-target, Lean-trained probe → Python labels (generator / Goedel residual / heads), held & hard | | | 0.68 / 0.67 / 0.67 | 0.61 / 0.70 / 0.70 | | | |
+| cross-target, Python-trained probe → Lean labels | | | 0.69 / 0.65 / 0.66 | 0.77 / 0.80 / 0.85 | | | |
 
-**The generator knows whether its step will check out in Python** (0.78 held-out, 0.80 on hard
-problems) far better than whether it will prove in Lean (0.70 / 0.67) — the first probe target on
-which the model that wrote the step beats the formalizer's state. Refutation is less readable
-(0.69 / 0.60). The Python and Lean targets share most of a direction (cross-target 0.65–0.86), as
-expected for two readings of "is this step right". (The hard-tree column is on the 1,753 steps
-done so far and is inflated by that set's many wrong steps; re-read at full data.)
+**The generator knows whether its step will check out in Python** (0.78 held-out, 0.72 on hard trees,
+0.71 on natural CoT) better than whether it will prove in Lean (0.70 / 0.69 / 0.60) — the first probe
+target on which the model that wrote the step is the best reader of it on its own distribution; the
+formalizer's state is the better reader of *Python* verifiability on the beam arms (0.79 on hard beam
+steps) and of refutation (0.79 on easy beam). The Python and Lean targets share most of a direction
+(cross-target 0.61–0.85). Python verifiability is, across the board, 0.05–0.10 AUC more predictable
+from internal state than Lean verifiability — it is a cleaner target.
 
 ### 13.3 Routing between verifiers (first version, forked trees)
 
@@ -1326,17 +1328,23 @@ value is the 5–7 % of steps Python misses but Lean proves, at ~20× the cost p
 
 **Two-stage, cost-aware router** (`router_eval2.py`): run Python on every step; among the steps it
 did not verify, a probe predicts "Lean would prove this" and only the top b % of all steps go to
-Lean. Fit on 2,733 python-unverified fit steps (18.7 % Lean-provable):
+Lean. Fit on 2,733 python-unverified fit steps (18.7 % Lean-provable); Goedel-residual probe (full
+data):
 
-| stage-2 probe | set | AUC (lean \| ¬python) | verified share: Python only → +Lean on 5 % / 10 % / 20 % / 30 % of steps | oracle | precision of the 10 % sent |
+| set | P(lean \| ¬python) | AUC | verified share: Python only → +Lean on 5 % / 10 % / 20 % / 30 % | oracle (either) | precision of the 10 % sent vs random |
 |---|---|---|---|---|---|
-| Goedel residual (facts) | held | 0.646 | 0.402 → 0.415 / 0.423 / 0.437 / 0.449 | 0.469 | 0.21 (random 0.11) |
-| Goedel residual (facts) | hard trees | **0.811** | 0.205 → 0.224 / **0.234** / 0.243 / 0.246 | 0.257 | **0.29** (random 0.07) |
-| generator state | held | 0.652 | 0.402 → 0.418 / 0.426 / 0.438 / 0.449 | 0.469 | 0.23 |
-| generator state | hard trees | 0.653 | 0.205 → 0.215 / 0.221 / 0.228 / 0.234 | 0.257 | 0.17 |
+| forked held | 0.11 | 0.649 | 0.402 → 0.415 / 0.423 / 0.438 / 0.449 | 0.469 | 0.21 vs 0.11 |
+| hard trees | 0.07 | **0.752** | 0.249 → 0.255 / 0.266 / 0.279 / 0.285 | 0.298 | 0.17 vs 0.07 |
+| easy beam | 0.27 | 0.703 | 0.535 → 0.560 / 0.581 / 0.617 / 0.640 | 0.661 | 0.46 vs 0.27 |
+| hard beam | 0.12 | 0.628 | 0.282 → 0.297 / 0.304 / 0.318 / 0.333 | 0.370 | 0.23 vs 0.12 |
+| natural CoT | 0.45 | 0.492 | 0.641 → 0.663 / 0.684 / 0.729 / 0.780 | 0.801 | 0.43 vs 0.45 |
 
-Reading: routing works where it matters most. On hard problems the formalizer's state tells
-which Python-unverified steps Lean can close (AUC 0.81): sending 10 % of steps to Lean recovers
-+2.9 of the 5.2 points between Python-only and the oracle, four times what random routing would
-(0.7). On easy problems the signal is weaker (0.65) and the Lean margin smaller. The probe is
+(the generator-state router is 0.02–0.12 AUC worse everywhere except forked held.)
+
+Reading: the router roughly doubles the yield of each Lean call over random routing wherever
+Lean's marginal value is small (held, hard trees, hard beam: precision 0.17–0.23 vs 0.07–0.12), and
+on the easy beam steps 10 % Lean recovers +4.6 of the 12.6 points to the oracle. On natural CoT the
+router is at chance but it does not matter: 45 % of Python-unverified steps prove in Lean there, so
+the right policy is simply to send more — the verifier mix depends on the generator's step style
+(retro-segmented natural CoT leans on context Python checks cannot see). The probe is
 saved as `probe/probes/router_lean_given_nopython.npz` for the routed decode (§13.5).
