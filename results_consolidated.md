@@ -75,6 +75,16 @@ selection moves it by +6–8 points with CIs excluding zero.
 | The formalizer's own residual stream — and its attention heads — are usable but not better judges | FaithformBench-trained Goedel probes 0.58–0.64 on our steps (chance under the pipeline's rendering); probes refit on the generator's 4,435 labelled steps 0.67–0.78 OOD, = Qwen3 classifier on hard trees (0.778 vs 0.742), below it elsewhere (0.707 vs 0.720 easy; 0.583 vs 0.654 natural CoT); head probes with benchmark-selected heads = residual probe (±0.01); the head *selection* is the one FaithformBench artefact that transfers zero-shot (4 heads: 0.70 / 0.76 on easy / hard steps vs ≈ 0.6 for every benchmark-trained classifier) |
 | Stronger steering saturates on formalization and trades accuracy | α 1 → 4 → 30: word share +2 → +2 → —, accuracy −3 → −9 → −10 points | FT §8.6 |
 
+## E. The weak-verifier programme (Nov 2026, FT §13)
+
+| question | answer | source |
+|---|---|---|
+| Can a code model check reasoning steps in Python? | Yes, with coverage limited by program quality: Qwen3-30B 39 % verified / 27 % refuted / 34 % unknown on MATH-train steps; Qwen3-Coder-Next 55 / 31 / 13 %. Sycophancy on number-perturbed claims 22.5 % (30B) and 31 % (Coder-Next). | FT §13.1 |
+| Does it carry correctness signal Lean lacks? | Yes — refutation. Steps only in wrong solutions are refuted 32–45 % of the time, steps only in correct ones 7–12 %; "fewest refutations" picks the correct trajectory +9.5 pts over random on MATH-train trees [+0.040, +0.148], Lean rate +5.5; wrong vCoT solutions contain a refuted step 71–86 % of the time vs 28–40 % for correct ones. | FT §13.1, §13.6 |
+| Is Python verifiability learnable / readable? | More than Lean's: generator-state probe 0.78 held-out (Lean 0.70); external Qwen3-1.7B 0.794 (Lean 0.753). | FT §13.2, §13.4 |
+| Which verifier for which step? | Always run Python (≈ 85 % of the two-verifier oracle at negligible cost); a probe on the formalizer's state routes the rest: 10 % of steps to Lean roughly doubles each call's yield over random (precision 0.17–0.46 vs 0.07–0.27). Routed-verifier beam decode: PENDING_ROUTED. | FT §13.3, §13.5 |
+| Can the generator emit verifiable CoT natively? | A 118-trajectory SFT (correct, no refuted step; JSON `[{step, verifier}]`) beats the step-native SFT by 12–13 pts (0.709 / 0.373 greedy vs 0.591 / 0.255, tag-free control; 0.645 / 0.382 with tags) and learns the tags (python-tagged steps verify 1.6× more often than none-tagged) — but does not write more verifiable steps than the beam (verified share 0.68 / 0.48–0.50 vs 0.68 / 0.49). Data is the limit: 52 problems. | FT §13.6 |
+
 ## D. Paper
 
 **Working title.** *Lean-verified process rewards for mathematical reasoning: when

@@ -1289,6 +1289,37 @@ selection needs and what "not proved" does not provide. On the 60 hard trees the
 the same +0.058 (with only four trajectories per problem the picks coincide); the within-problem ρ
 of "fewest refutations" (+0.44) is the highest of any score measured in this project.
 
+**Second verifier: Qwen3-Coder-Next** (80B-A3B, two cards, 7.0 GPU-h; same prompts, K = 4). Program
+quality is much higher — no-verdict + error + no-code 16 % of programs vs 37 % — so fewer steps end
+unknown (13 % vs 34 % on the trees), and both verified and refuted rates rise:
+
+| set | 30B: verified / refuted / unknown | Coder-Next: verified / refuted / unknown | Coder-Next P(verified \| Lean) / P(verified \| ¬Lean) |
+|---|---|---|---|
+| MATH-train trees | 0.387 / 0.270 / 0.341 | 0.551 / 0.314 / 0.134 | 0.787 / 0.461 |
+| hard trees | 0.249 / 0.355 / 0.395 | 0.311 / 0.404 / 0.281 | 0.845 / 0.224 |
+| easy beam arms | 0.535 / 0.226 / 0.237 | 0.678 / 0.225 / 0.086 | 0.862 / 0.547 |
+| hard beam arms | 0.282 / 0.380 / 0.337 | 0.386 / 0.451 / 0.150 | 0.761 / 0.290 |
+| natural CoT | 0.641 / 0.053 / 0.305 | 0.888 / 0.051 / 0.058 | 0.954 / 0.797 |
+| perturbed controls | 0.120 / 0.543 / 0.333 | 0.187 / 0.663 / 0.143 | sycophancy 0.314 (30B: 0.225) |
+
+The two verifiers give the identical verdict on 64 % of steps and contradict each other (one verified,
+one refuted) on 4.4 %. Coder-Next is the more *decisive* and the more *permissive* checker: it
+rubber-stamps 31 % of altered claims whose source it verified (30B: 22.5 %) and verifies 46–80 % of
+steps Lean does not prove. The correct-vs-wrong separation is sharper on the refutation side and
+sharpest for the two verifiers combined:
+
+| trees | group | 30B verified / refuted | Coder-Next verified / refuted | verified by both | refuted by either |
+|---|---|---|---|---|---|
+| MATH-train | only in correct solutions (945) | 0.65 / 0.11 | 0.81 / 0.12 | **0.63** | **0.17** |
+| MATH-train | only in wrong solutions (4,114) | 0.32 / 0.32 | 0.48 / 0.37 | 0.28 | 0.43 |
+| hard | only in correct (365) | 0.66 / 0.12 | 0.83 / 0.10 | **0.64** | **0.15** |
+| hard | only in wrong (3,319) | 0.19 / 0.39 | 0.24 / 0.45 | 0.13 | 0.51 |
+
+Reading: checker capacity buys coverage (fewer unknowns) more than discrimination; the two
+checkers disagree enough that an ensemble ("verified by both", "refuted by either") is the better
+label, and the sycophancy control is the number to watch when choosing a checker — a stronger coder
+is also a more agreeable one.
+
 ### 13.2 Python verifiability is more readable from internal state than Lean verifiability
 
 Probes on the stored activations (forked fit split, standard recipe; `probe_eval_python.py`), target =
