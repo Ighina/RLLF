@@ -1402,3 +1402,28 @@ Reading, first round:
 3. The data is the limit, as anticipated: 52 problems, 7 at level 5. The natural next step is to
    generate more MATH-train trajectories, filter them with the (cheap) Python verifier alone, and
    retrain — which is also where the router's "which verifier" label would come from at scale.
+
+**Are the tagged steps verifiable as tagged?** Python checks (30B verifier, K = 4) on all 4,206 decoded
+steps of the four vCoT runs (`pyverify_vcot/`):
+
+| run | steps | verified / refuted / unknown | python-tagged: verified / refuted | none-tagged | lean-tagged | per-solution verified share | refuted-free solutions |
+|---|---|---|---|---|---|---|---|
+| heuristic tags, easy | 930 | 0.629 / 0.110 / 0.261 | **0.67** / 0.11 (n = 795) | 0.40 / 0.11 (120) | 0.27 / 0.13 (15) | 0.678 | 61 / 103 |
+| heuristic tags, hard | 1,381 | 0.457 / 0.175 / 0.368 | **0.53** / 0.17 (868) | 0.33 / 0.18 (468) | 0.40 / 0.22 (45) | 0.481 | 39 / 109 |
+| tag-free control, easy | 809 | 0.637 / 0.125 / 0.239 | — | 0.64 / 0.12 (all) | — | 0.681 | 67 / 106 |
+| tag-free control, hard | 1,086 | 0.455 / 0.177 / 0.368 | — | 0.45 / 0.18 (all) | — | 0.502 | 37 / 103 |
+| reference `beam_lm` (step-native, beam 4 × 2) | — | — | — | — | — | 0.677 / 0.492 | 69 / 110 ; 39 / 110 |
+
+1. **The model's own tags are a free router.** Steps it tags `python` verify in Python 1.6–1.7×
+   more often than steps it tags `none` (0.67 vs 0.40 easy, 0.53 vs 0.33 hard); the rare `lean` tag
+   marks steps that Python verifies *least* (0.27 / 0.40) — the tag semantics transferred from 118
+   examples. The generator can say, while writing, which verifier each step is for.
+2. **Tagging does not change what gets written.** Per-solution Python-verified share and the share
+   of refutation-free solutions are the same for the tagged model, the tag-free control and the
+   step-native beam (0.68 / 0.68 / 0.68 easy; 0.48 / 0.50 / 0.49 hard). A 118-example SFT teaches
+   the format and the labels, not more verifiable reasoning — that needs the selection to bite on
+   more data, or a verifier-in-the-loop decode.
+3. **Refutation is the correctness signal on these outputs too.** A wrong vCoT solution contains a
+   Python-refuted step 71–86 % of the time, a correct one 28–40 % — the same gap as on the trees
+   (§13.1), now on greedy outputs of a different model. A single pass of the weak verifier over a
+   solution is a usable correctness filter (and a natural self-consistency weight / rejection signal).
