@@ -1240,41 +1240,54 @@ trajectories in a JSON `[{step, verifier}]` format (MATH-train only). Scripts
 the fallback), `pyverify_execute.py` (import blacklist, `python -I`, 10 s CPU / 4 GB, verdict
 line `VERDICT: TRUE|FALSE|UNCHECKABLE`); outputs under `pyverify*/`.
 
-### 13.1 First 7,168 steps (Qwen3-30B-A3B fallback; the full run is queued)
+### 13.1 All 20,964 steps + 300 perturbed controls (Qwen3-30B-A3B-Instruct; Coder-Next run in progress)
 
-Program outcomes over 28,672 programs: TRUE 31%, FALSE 27%, no verdict line 15%, runtime
-error 19%, no code block 6%, timeout 2%, UNCHECKABLE 0.3% — the model almost never declares a
-step uncheckable and a third of steps end "unknown" through program failure; program quality
-is the first thing to improve. Aggregated verdicts (majority of ≥ 2 agreeing samples):
+85,056 programs (K = 4 per step; 1.2 + 1.7 GPU-h of generation, 20 CPU-min of sandboxed execution).
+Program outcomes: TRUE 35 %, FALSE 26 %, no verdict line 15 %, runtime error 16 %, no code block 6 %,
+timeout 0.7 %, UNCHECKABLE 0.3 %. The model essentially never declares a step uncheckable; a third
+of steps end "unknown" through program failure, so checker quality (prompting, repair, more samples)
+is the first lever. Aggregated verdicts (majority of ≥ 2 agreeing samples):
 
 | set | n | verified | refuted | unknown | Lean proved | P(verified \| Lean) | P(verified \| ¬Lean) | P(Lean \| verified) | P(Lean \| refuted) |
 |---|---|---|---|---|---|---|---|---|---|
-| MATH-train trees (all) | 5,415 | 0.387 | 0.270 | 0.341 | 0.276 | 0.614 | 0.300 | 0.438 | 0.170 |
-| hard trees (partial) | 1,753 | 0.205 | 0.408 | 0.386 | 0.128 | 0.589 | 0.148 | 0.368 | 0.032 |
+| MATH-train trees | 5,415 | 0.387 | 0.270 | 0.341 | 0.276 | 0.614 | 0.300 | 0.438 | 0.170 |
+| hard trees (L4–5) | 3,786 | 0.249 | 0.355 | 0.395 | 0.140 | 0.647 | 0.184 | 0.363 | 0.039 |
+| easy beam arms (L1–3) | 5,149 | 0.535 | 0.226 | 0.237 | 0.414 | 0.698 | 0.420 | 0.540 | 0.135 |
+| hard beam arms (L4–5) | 5,058 | 0.282 | 0.380 | 0.337 | 0.204 | 0.568 | 0.209 | 0.410 | 0.092 |
+| natural CoT cache (L1–3) | 1,556 | 0.641 | 0.053 | 0.305 | 0.576 | 0.722 | 0.532 | 0.648 | 0.434 |
+| **perturbed controls** (one number changed) | 300 | **0.120** | **0.543** | 0.333 | — | | | | |
 
-**The weak verifier separates correct from wrong reasoning far better than Lean does.** Steps
-that occur only in correct trajectories vs only in wrong ones:
+**Sycophancy control.** Of the 129 controls whose *unaltered* source step was verified, the
+altered version is verified 22.5 % of the time (29), refuted 44 % (57), unknown 33 %. So the checker
+rubber-stamps roughly one false claim in five that it would have verified when true — a real
+false-positive rate, but it catches wrong arithmetic in a way Lean's pipeline never does (§9: 2.3 %
+of failures refutable).
 
-| set | steps only in correct trajectories: verified / refuted / Lean proved | steps only in wrong trajectories: verified / refuted / Lean proved |
+**The weak verifier separates correct from wrong reasoning far better than Lean does**, on every
+set. Steps that occur only in correct vs only in wrong solutions:
+
+| set | only in correct: verified / refuted / Lean proved | only in wrong: verified / refuted / Lean proved |
 |---|---|---|
 | MATH-train trees | 0.652 / **0.109** / 0.429 (n = 945) | 0.319 / **0.316** / 0.232 (n = 4,114) |
 | hard trees | 0.695 / **0.065** / 0.390 (n = 154) | 0.145 / **0.450** / 0.093 (n = 1,562) |
+| easy beam arms | 0.666 / **0.070** / — (n = 1,869) | 0.457 / **0.329** / — (n = 3,072) |
+| hard beam arms | 0.623 / **0.083** / — (n = 727) | 0.222 / **0.432** / — (n = 4,308) |
 
-And as a trajectory-selection oracle on the 150 MATH-train trees (pick the trajectory with the
-best score; the §5.4 protocol):
+As a trajectory-selection oracle (pick the trajectory with the best score; §5.4 protocol):
 
-| oracle score | pick acc | random | oracle | gain [95% CI] | within-problem ρ |
-|---|---|---|---|---|---|
-| Lean proved rate | 0.373 | 0.318 | 0.547 | +0.055 [+0.005, +0.107] | +0.25 |
-| Python verified rate | 0.380 | 0.318 | 0.547 | +0.062 [+0.013, +0.110] | +0.29 |
-| Python verified − refuted | 0.407 | 0.318 | 0.547 | **+0.088 [+0.035, +0.140]** | +0.39 |
-| fewest Python refutations | **0.413** | 0.318 | 0.547 | **+0.095 [+0.040, +0.148]** | **+0.44** |
+| trees | score | pick acc | random | oracle | gain [95% CI] | within-problem ρ |
+|---|---|---|---|---|---|---|
+| MATH-train (150) | Lean proved rate | 0.373 | 0.318 | 0.547 | +0.055 [+0.005, +0.107] | +0.25 |
+| MATH-train | Python verified rate | 0.380 | 0.318 | 0.547 | +0.062 [+0.013, +0.110] | +0.29 |
+| MATH-train | Python verified − refuted | 0.407 | 0.318 | 0.547 | **+0.088 [+0.035, +0.140]** | +0.39 |
+| MATH-train | fewest Python refutations | **0.413** | 0.318 | 0.547 | **+0.095 [+0.040, +0.148]** | **+0.44** |
+| hard (60) | Lean proved rate | 0.367 | 0.308 | 0.467 | +0.058 [−0.013, +0.125] | +0.35 |
+| hard (60) | any Python score | 0.367 | 0.308 | 0.467 | +0.058 [−0.004, +0.125] | +0.22 to +0.44 |
 
-The extra signal is refutation: a Python check can say a step is *wrong*, which is exactly
-what trajectory selection needs and what Lean's "not proved" does not provide. Caveats until
-the full run lands: the sycophancy control (300 number-perturbed steps) is not yet generated,
-so how often the checker rubber-stamps a false claim is unknown; the numbers are from the
-30B fallback model on a third of the steps.
+The extra signal is refutation — a Python check can say a step is *wrong*, which is what trajectory
+selection needs and what "not proved" does not provide. On the 60 hard trees the four scores tie at
+the same +0.058 (with only four trajectories per problem the picks coincide); the within-problem ρ
+of "fewest refutations" (+0.44) is the highest of any score measured in this project.
 
 ### 13.2 Python verifiability is more readable from internal state than Lean verifiability
 
