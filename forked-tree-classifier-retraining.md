@@ -1348,3 +1348,57 @@ router is at chance but it does not matter: 45 % of Python-unverified steps prov
 the right policy is simply to send more — the verifier mix depends on the generator's step style
 (retro-segmented natural CoT leans on context Python checks cannot see). The probe is
 saved as `probe/probes/router_lean_given_nopython.npz` for the routed decode (§13.5).
+
+### 13.4 External classifiers for Python verifiability
+
+Same recipe as `forked_supervised_qwen3` (§8: Qwen3-1.7B, last-token pooling, lr 2e-5, forked fit
+split, best held-out epoch), targets from the weak verifier (`launch_python_classifiers.sh`, 0.7 GPU-h):
+
+| classifier (target) | held-out step AUC vs its target | the Lean-trained `forked_supervised_qwen3` vs the same target | sibling acc | PRM pick (true target rate) vs random / oracle | pick acc |
+|---|---|---|---|---|---|
+| `python_verified_qwen3` (verified) | **0.794** | 0.735 | 0.810 | 0.536 vs 0.509 / 0.590 | 0.233 (random 0.275) |
+| `python_not_refuted_qwen3` (not refuted) | 0.695 | 0.628 | 0.611 | 0.803 vs 0.766 / 0.849 | **0.367** (random 0.275) |
+| (`forked_supervised_qwen3` vs Lean, §8.1) | 0.753 | — | 0.68 | 0.355 vs 0.302 / 0.422 | 0.267 |
+
+Python verifiability is also the more learnable target for the external classifier (0.79 vs 0.75 for
+Lean on the same architecture and data), and the Lean-trained classifier already predicts it at
+0.735. The "not refuted" classifier is the weaker judge of its own target (0.695) but the only one of
+the three whose trajectory pick is more often *correct* than random on the held-out trees (0.367
+vs 0.275, 30 problems — one split, direction only) — consistent with §13.1: avoiding refuted steps
+is what tracks correctness.
+
+### 13.6 Natively verifiable chain-of-thought — SFT (first round, small data)
+
+`scripts/finetune_verifiable_cot.py`: Qwen2.5-7B-Instruct, LoRA all-linear, 4 epochs, on the 118
+MATH-train forked-tree trajectories that are correct and contain no Python-refuted step (52
+problems; tags python 730 / lean 72 / none 111), assistant turn = JSON `[{step, verifier}, …,
+{final_answer}]`. Control: the same trajectories with every tag `none`. Greedy decode with vLLM on
+the easy and hard 110 (`vcot_decode.py`); 0.14 GPU-h for both trainings and all four decodes.
+
+| model | easy acc strict / lenient | hard acc strict / lenient | parsed | steps/sol | tags emitted (easy / hard) |
+|---|---|---|---|---|---|
+| step-native SFT, greedy (§5.2 / §11.2) | 0.591 | 0.255 | — | 8.9 / 16.6 | — |
+| `beam_lm` (step-native, beam 4 × 2) | 0.655 | 0.382 | — | 9.3 / 23.3 | — |
+| **vCoT, tag-free control** (`vcot_none`) | **0.709 / 0.773** | 0.373 / 0.427 | 106 / 103 of 110 | 8.2 / 10.4 | none 100 % |
+| **vCoT, heuristic tags** (`vcot_heuristic`) | 0.645 / 0.718 | **0.382 / 0.436** | 103 / 109 | 8.5 / 12.6 | python 85 % / 63 %, none 13 % / 33 %, lean 2 % / 3 % |
+
+("lenient" also accepts the value after the last `=` or the last number when the model wrote a
+sentence into `final_answer`, which it did on about half the problems — a format defect of the
+118-example SFT, to fix with a stricter training target.)
+
+Reading, first round:
+
+1. **A 118-trajectory SFT on verifiability-selected solutions recovers the base model's accuracy
+   and beats the step-native SFT by 12–13 points** (greedy 0.709 / 0.373 vs 0.591 / 0.255; the
+   step-native fine-tune on 226 FaithformBench solutions had cost 7 points). The JSON format itself
+   costs nothing: the tag-free control matches `beam_lm` on hard problems *without search* and beats
+   it on easy ones. Selecting training trajectories by "correct and nothing refuted" is a cheap,
+   effective data filter.
+2. **The verifier tags are learned and largely sensible** — 85 % python on easy problems, 63 % on
+   hard with a third `none`, almost no `lean` (2–3 %, as in the training mix) — at a cost of 6 points
+   of strict accuracy on easy problems (7 problems; n.s.) and no cost on hard ones. Whether the
+   tagged steps *are* verifiable as tagged is being measured: Python checks on all 4,206 decoded
+   steps and real Lean on the 60 lean-tagged plus 400 tag-stratified steps are queued.
+3. The data is the limit, as anticipated: 52 problems, 7 at level 5. The natural next step is to
+   generate more MATH-train trajectories, filter them with the (cheap) Python verifier alone, and
+   retrain — which is also where the router's "which verifier" label would come from at scale.
