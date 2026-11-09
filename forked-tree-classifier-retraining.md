@@ -1458,3 +1458,18 @@ steps of the four vCoT runs (`pyverify_vcot/`):
    Python-refuted step 71–86 % of the time, a correct one 28–40 % — the same gap as on the trees
    (§13.1), now on greedy outputs of a different model. A single pass of the weak verifier over a
    solution is a usable correctness filter (and a natural self-consistency weight / rejection signal).
+
+**Lean on the tagged steps** (`vcot_lean_sample.py`, 6.0 GPU-h): all 60 lean-tagged steps and 200
+random python- and none-tagged steps of the tagged model's outputs, real-Lean labelled:
+
+| tag | n | Lean proved | Python verified | Python refuted | verified by either |
+|---|---|---|---|---|---|
+| python | 200 | **0.550** | 0.600 | 0.170 | 0.735 |
+| lean | 60 | 0.400 | 0.367 | 0.200 | 0.583 |
+| none | 200 | 0.410 | 0.500 | 0.150 | 0.615 |
+
+The `lean` tag does **not** pick out Lean-provable steps (0.40, below the python-tagged steps' 0.55):
+with 72 `lean` examples in the SFT data it learned "not computable" rather than "formalizable", and
+those steps are the hardest for both verifiers. The `python` tag is the informative one, on both
+verifiers. For the training label this argues for dropping the heuristic's `lean` class until the
+pool has enough Lean-proved-but-Python-unverified steps to teach it.
