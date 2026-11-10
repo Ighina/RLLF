@@ -1473,3 +1473,34 @@ with 72 `lean` examples in the SFT data it learned "not computable" rather than 
 those steps are the hardest for both verifiers. The `python` tag is the informative one, on both
 verifiers. For the training label this argues for dropping the heuristic's `lean` class until the
 pool has enough Lean-proved-but-Python-unverified steps to teach it.
+
+### 13.5 Routed-verifier beam search (Nov 9–11)
+
+`routed_hybrid_decode.py`, two cards: the 30B code model served by vLLM on one, the step-native
+generator + Goedel probe (judge and router share one capture) + Lean pipeline on the other. Every
+candidate step gets the Python check (K = 2 programs; verified → kept, refuted → pruned at −50);
+Python-unverified candidates go to Lean when the router probe's logit ≥ 1.38 (its top-10 % quantile)
+and the 24-call budget allows, else fall back to the judge logit. Beam 4 × 2, α = 1, mean aggregation.
+48 GPU-h (the job's cap: 110 easy + 109 hard problems decoded; Lean labels of the final trajectories
+queued separately).
+
+| set | arm | acc | vs `beam_lm` (W/L, p) | vs Qwen3 arm | vs hybrid | vs residual probe | steps/sol | words/sol | python checks / Lean calls / declined per problem |
+|---|---|---|---|---|---|---|---|---|---|
+| easy 110 | `beam_lm` | 0.655 | — | | | | 9.3 | 108 | — |
+| easy 110 | **`beam_routed`** | **0.673** | 10/8, p = 0.81 | 15/10 (0.627) | 11/9 (0.655) | 20/12 (0.600) | 9.8 | 91 | 85 / 5.2 / 22 |
+| hard 109 | `beam_lm` | 0.385 | — | | | | 23.3 | 249 | — |
+| hard 109 | **`beam_routed`** | **0.385** | 9/9, p = 1.0 | 11/10 (0.376) | — | 11/9 (0.367) | 12.9 | 141 | 110 / 6.0 / 26 |
+
+Verifier traffic over all candidates: easy 9,317 checked — 55 % verified, 13 % refuted (pruned),
+32 % unknown, of which 573 routed to Lean (46 % proved) and 2,418 declined to the judge; hard
+12,357 — 48 % / 23 % / 28 %, 656 to Lean (38 % proved), 2,854 declined. The router's Lean precision
+(0.46 / 0.38) is 1.7–2× the unrouted rate among Python-unverified steps (§13.3).
+
+Reading: the routed arm is the **first judge-steered arm that is not below the search-only control
+on accuracy** — +1.8 points on easy (10/8) and level on hard (9/9), where every classifier, probe
+and α setting before it lost 1–10 points (§8.3, §8.6, §12). It also writes the shortest solutions
+of any arm (91 / 141 words vs 108 / 249). None of this is significant on 110 problems; the
+difference from the earlier arms is that refutation prunes *wrong* steps rather than merely
+preferring formalizable ones. Formalization (real Lean on the final trajectories) and the
+Python-verified share of the chosen solutions are reported below once the labels land.
+ROUTED_LEAN_PLACEHOLDER
