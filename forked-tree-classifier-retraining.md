@@ -1503,4 +1503,26 @@ of any arm (91 / 141 words vs 108 / 249). None of this is significant on 110 pro
 difference from the earlier arms is that refutation prunes *wrong* steps rather than merely
 preferring formalizable ones. Formalization (real Lean on the final trajectories) and the
 Python-verified share of the chosen solutions are reported below once the labels land.
+**Python-verified share of the chosen solutions** (routed arm: its own decode-time checks, K = 2; other
+arms: the 30B verifier, K = 4 — *not* an independent measurement for the routed arm, whose refuted
+candidates were pruned by construction; an independent Coder-Next re-check of all three arms' final
+steps is queued):
+
+| set | arm | verified share | refuted share | refutation-free solutions | acc |
+|---|---|---|---|---|---|
+| easy | `beam_routed` | **0.844** | 0.008 | **0.909** | 0.673 |
+| easy | `beam_lm` | 0.676 | 0.082 | 0.591 | 0.655 |
+| easy | `beam_forked_qwen3` | 0.695 | 0.077 | 0.600 | 0.627 |
+| easy | hybrid (Lean in the loop) | 0.683 | 0.085 | 0.591 | 0.655 |
+| hard | `beam_routed` | **0.750** | 0.022 | **0.817** | 0.385 |
+| hard | `beam_lm` | 0.516 | 0.168 | 0.321 | 0.385 |
+| hard | `beam_forked_qwen3` | 0.556 | 0.158 | 0.413 | 0.376 |
+
+By construction the routed solutions are almost refutation-free (91 % / 82 % of solutions vs 59 % /
+32 % for the search alone) and carry +17 / +23 points of Python-verified content — the weak
+verifier in the loop produces solutions that pass the weak verifier. What the pruning does *not*
+do is buy accuracy: on hard problems 82 % of the routed solutions are refutation-free and 38.5 %
+are correct, exactly `beam_lm`'s 38.5 % — the wrong solutions that survive are wrong in ways the
+checker cannot see (or verifies anyway: §13.1's 22–31 % sycophancy), and the per-problem budget
+caps how much pruning happens on the hardest problems (26 declined candidates per hard problem).
 ROUTED_LEAN_PLACEHOLDER
