@@ -1525,4 +1525,19 @@ do is buy accuracy: on hard problems 82 % of the routed solutions are refutation
 are correct, exactly `beam_lm`'s 38.5 % — the wrong solutions that survive are wrong in ways the
 checker cannot see (or verifies anyway: §13.1's 22–31 % sycophancy), and the per-problem budget
 caps how much pruning happens on the hardest problems (26 declined candidates per hard problem).
-ROUTED_LEAN_PLACEHOLDER
+**Real Lean on the chosen solutions — easy 110** (all labelled; hard set labelling re-queued after
+the job hit the one missing problem):
+
+| easy 110, paired | `beam_lm` | `beam_routed` | better / worse | sign p | Wilcoxon p |
+|---|---|---|---|---|---|
+| step rate | 0.526 | 0.549 | 39 / 27 | 0.18 | 0.092 |
+| word share | 0.522 | 0.535 | 38 / 33 | 0.64 | 0.33 |
+| proved steps / solution | 4.26 | 4.71 | 33 / 27 | 0.52 | 0.47 |
+| correct | 0.655 | 0.673 | 10 / 8 | 0.82 | 0.64 |
+
+vs the Qwen3-classifier arm: step rate 0.557 → 0.549, word share 0.543 → 0.535, correct 15/10 — the
+routed arm matches the external judge's formalization and edges it on accuracy (n.s.). So on easy
+problems the weak verifier in the loop gives: Lean-verified content about what the Qwen3 judge or
+Lean-in-the-loop gave (+2 points, n.s.), Python-verified content far above either (+17 points, by
+construction), and accuracy at or slightly above the control instead of below it.
+ROUTED_LEAN_HARD_PLACEHOLDER
