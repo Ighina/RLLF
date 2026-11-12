@@ -350,5 +350,77 @@ code{font-family:var(--mono);font-size:.92em}
 <tr><td>"Not proved" read as "false"</td><td class="num">2.3% of failures refutable</td><td>metric renamed in practice: provable by this pipeline</td></tr>
 </table>
 
+<h2>7. Publication: scope, target, potential</h2>
+<p>Two papers are in this material, not one. The Lean programme is a finished analysis paper with one positive lead. The weak-verifier programme is the opening of a second, methods paper whose central experiment is still queued. Mixing them would bury the first paper's clean thesis under the second's partial results.</p>
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 900 400" role="img" aria-label="Scope map. Paper A, the Lean analysis paper, has a core lane of six experiments and an appendix lane of five. Paper B, the weak-verifier methods paper, has four experiments of which two are complete, one awaits its last label set, and one needs a larger dataset. Two corrections feed both papers as methodology.">
+<g fill="none" stroke="currentColor" stroke-width="1.2">
+<rect x="20" y="40" width="540" height="330" rx="6"/>
+<rect x="590" y="40" width="290" height="330" rx="6" stroke-dasharray="5 4"/>
+</g>
+<g font-size="13" fill="currentColor" font-weight="600">
+<text x="34" y="62">Paper A · Lean-verified process rewards: when formalizability is, and is not, a proxy for correctness</text>
+<text x="604" y="62">Paper B · Weak verifiers for reasoning steps</text>
+</g>
+<g font-size="11" fill="currentColor" opacity=".7" font-weight="600" letter-spacing=".06em">
+<text x="34" y="92">CORE (sections 3–7)</text><text x="300" y="92">APPENDIX</text><text x="604" y="92">STATUS</text>
+</g>
+<!-- core tiles -->
+<g font-size="11.5" fill="currentColor">
+<g stroke="#1b7f79" fill="none" stroke-width="1.2"><rect x="34" y="104" width="240" height="34" rx="3"/><rect x="34" y="146" width="240" height="34" rx="3"/><rect x="34" y="188" width="240" height="34" rx="3"/><rect x="34" y="230" width="240" height="34" rx="3"/><rect x="34" y="272" width="240" height="34" rx="3"/><rect x="34" y="314" width="240" height="34" rx="3"/></g>
+<text x="44" y="118">Transfer gap: offline AUC ≠ in-generator AUC</text><text x="44" y="132" opacity=".7">0.80–0.86 → 0.50–0.61, every encoder</text>
+<text x="44" y="160">In-generator judges: distribution, then capacity</text><text x="44" y="174" opacity=".7">MiniLM 0.69 / Qwen3 0.75, OOD 0.65–0.74</text>
+<text x="44" y="202">Step-level steering never moves accuracy</text><text x="44" y="216" opacity=".7">9 arms, 2 difficulty bands, all within noise</text>
+<text x="44" y="244">Lean in the loop raises verified content</text><text x="44" y="258" opacity=".7">+6 pts word share, p=.004, 11 calls/problem</text>
+<text x="44" y="286">Formalizability ↔ correctness only on hard problems</text><text x="44" y="300" opacity=".7">oracle −.02 easy / +.06 hard; judge pick +.075</text>
+<text x="44" y="328">What "proved" measures</text><text x="44" y="342" opacity=".7">2.3% refutable; rendering flips 33%; binders 607</text>
+</g>
+<!-- appendix tiles -->
+<g font-size="11.5" fill="currentColor">
+<g stroke="currentColor" fill="none" stroke-width="1" opacity=".6"><rect x="300" y="104" width="240" height="34" rx="3"/><rect x="300" y="146" width="240" height="34" rx="3"/><rect x="300" y="188" width="240" height="34" rx="3"/><rect x="300" y="230" width="240" height="34" rx="3"/><rect x="300" y="272" width="240" height="34" rx="3"/></g>
+<text x="310" y="118">α sweep: stronger steering costs accuracy</text><text x="310" y="132" opacity=".7">−3 → −9 → −10 pts</text>
+<text x="310" y="160">Residual and head probes as judges</text><text x="310" y="174" opacity=".7">= external judge; benchmark heads transfer zero-shot</text>
+<text x="310" y="202">Forked trees: 43% Lean saving, sibling pairs</text><text x="310" y="216" opacity=".7">data-construction method</text>
+<text x="310" y="244">Ranking losses do not help on 5k labels</text><text x="310" y="258" opacity=".7">pairwise/listwise/ORM all ≤ BCE</text>
+<text x="310" y="286">Legacy caps and re-grades</text><text x="310" y="300" opacity=".7">max_steps 19–52% empty; +2–8 pts regraded</text>
+</g>
+<!-- paper B tiles -->
+<g font-size="11.5" fill="currentColor">
+<rect x="604" y="104" width="262" height="46" rx="3" fill="none" stroke="#1b7f79" stroke-width="1.2"/>
+<text x="614" y="120">Weak verifier carries refutation signal</text><text x="614" y="134" opacity=".7">refuted 7–11% vs 32–45%; pick +.095 [+.040, +.148]</text><text x="614" y="146" fill="#1b7f79" font-size="10.5">complete</text>
+<rect x="604" y="160" width="262" height="46" rx="3" fill="none" stroke="#1b7f79" stroke-width="1.2"/>
+<text x="614" y="176">Python verifiability is the cleaner target</text><text x="614" y="190" opacity=".7">probe 0.78 vs 0.70; classifier 0.794 vs 0.753</text><text x="614" y="202" fill="#1b7f79" font-size="10.5">complete</text>
+<rect x="604" y="216" width="262" height="46" rx="3" fill="none" stroke="#7d8697" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="614" y="232">Routed verifiers in the search</text><text x="614" y="246" opacity=".7">acc = control; +13 pts verified (indep.) on hard</text><text x="614" y="258" fill="#7d8697" font-size="10.5">hard-set Lean labels pending</text>
+<rect x="604" y="272" width="262" height="46" rx="3" fill="none" stroke="#a24a3c" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="614" y="288">Natively verifiable CoT (SFT)</text><text x="614" y="302" opacity=".7">+12–13 pts vs step-native; tags learned; 52 problems</text><text x="614" y="314" fill="#a24a3c" font-size="10.5">needs a 10× data pool</text>
+<text x="604" y="345" font-size="11" opacity=".8">Shared methodology: real-Lean pipeline on fresh</text><text x="604" y="359" font-size="11" opacity=".8">generations, rendering and binder corrections.</text>
+</g>
+</svg>
+</div>
+<figcaption>Scope. Paper A is complete and its core is six measured claims; the appendix holds the supporting sweeps and the data-construction method. Paper B reuses Paper A's pipeline and judges, and two of its four pillars are done; the routed decode awaits one label set and the SFT result needs a training pool an order of magnitude larger before it can carry a claim.</figcaption>
+</figure>
+
+<table>
+<tr><th>claim (Paper A)</th><th>evidence</th><th>strength</th><th>what would raise it</th><th>cost</th></tr>
+<tr><td>Benchmark-trained judges do not transfer</td><td class="num">every encoder, label source, probe; 5 sets</td><td class="pos">strong</td><td>a second generator family</td><td class="num">~20 GPU-h</td></tr>
+<tr><td>In-generator labels + capacity fix the judge</td><td class="num">0.69 → 0.75 in, 0.57–0.63 → 0.65–0.74 out</td><td class="pos">strong</td><td>—</td><td class="num">—</td></tr>
+<tr><td>Step-level steering does not move accuracy</td><td class="num">9 arms × 110 problems, all nulls</td><td class="pos">strong as a null</td><td>power: nulls on 110 problems bound effects at about ±8 pts only</td><td class="num">decode is cheap; Lean labels ~20 GPU-h per arm</td></tr>
+<tr><td>Lean in the loop raises verified content</td><td class="num">+6 pts, p=.004, 110 problems</td><td class="pos">solid</td><td>replicate on hard problems</td><td class="num">~45 GPU-h</td></tr>
+<tr><td>Hard-problem rerank gains accuracy</td><td class="num">+.075 [+.013, +.138], 60 problems, 1 split</td><td class="neut">lead</td><td>second 60-problem sample; second base model</td><td class="num">~60 GPU-h</td></tr>
+<tr><td>"Proved" = provable by this pipeline</td><td class="num">2.3% refutable; 33% rendering flips</td><td class="pos">solid</td><td>—</td><td class="num">—</td></tr>
+</table>
+
+<table>
+<tr><th>target</th><th>fit</th><th>reading</th></tr>
+<tr><td>TMLR</td><td class="pos">best fit as it stands</td><td>No deadline, values careful negative results and methodology, long format suits the corrections and the six-claim structure. The hard-problem lead is enough as a lead; it does not have to be a headline.</td></tr>
+<tr><td>Workshop: MATH-AI (NeurIPS/ICLR) or AI4Math (ICML)</td><td class="pos">near-certain acceptance</td><td>The transfer gap and the decoupling finding are exactly the cautionary results these audiences cite. Use it to get the result out early; the full paper goes to TMLR or a main track.</td></tr>
+<tr><td>Main track (NeurIPS / ICML / ICLR)</td><td class="neut">reachable with one replication</td><td>Needs the hard-problem rerank gain replicated on a second sample and ideally a second base model, so that the paper has a significant positive result alongside the nulls. About 60 GPU-hours and two weeks.</td></tr>
+<tr><td>Paper B venue</td><td class="neut">premature</td><td>Decide after the routed decode's Lean labels and a 10× SFT pool. If the SFT then writes more verifiable steps and holds accuracy, it is a main-track methods paper on its own; if not, the weak-verifier results fold into Paper A's discussion as a one-page section.</td></tr>
+</table>
+
+<div class="note"><strong>Projected value.</strong> Paper A is a reference people will cite when they build process rewards from formal verifiers: it shows the offline AUC does not transfer, what does, and where formalizability stops tracking correctness. That is a respected result rather than one people build on, which caps it at a well-cited analysis paper unless the hard-problem gain replicates. Paper B is where the upside is: refutation from cheap Python checks is the first signal in the programme that separates right from wrong reasoning on every set, and a generator that tags its own steps for the right verifier is a mechanism others would adopt. Its risk is the 22 to 31% sycophancy of the checker and the small training pool.</div>
+
 <div class="note">Budget to date: about 600 GPU-hours for the Lean programme, about 250 more for probes and the weak verifier. Every number here is in <code>results_consolidated.md</code> and sections 1 to 13 of <code>forked-tree-classifier-retraining.md</code>, with provenance.</div>
 </main>
