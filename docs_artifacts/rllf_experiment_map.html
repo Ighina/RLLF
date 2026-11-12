@@ -252,11 +252,11 @@ code{font-family:var(--mono);font-size:.92em}
 <circle cx="785" cy="240" r="6" fill="#1b7f79"/><text x="797" y="244" font-size="10.5" fill="#1b7f79">+.058 (p=.004)</text>
 <circle cx="672.5" cy="276" r="6" fill="#7d8697"/><text x="684" y="280" font-size="10.5" fill="currentColor">+.013 (p=.33)</text>
 <circle cx="750" cy="312" r="6" fill="#1b7f79"/><text x="762" y="316" font-size="10.5" fill="#1b7f79">+.044 (p=.018)</text>
-<text x="548" y="352" font-size="10.5" fill="currentColor" opacity=".8">Lean pending; Python-verified +.13 (p&lt;.0001, independent checker)</text>
+<circle cx="770" cy="348" r="6" fill="#1b7f79"/><text x="758" y="352" font-size="10.5" fill="#1b7f79" text-anchor="end">+.052 (p=.032); Python-checked +.13</text>
 </g>
 </svg>
 </div>
-<figcaption>Paired per problem against the search-only beam on the same 110 problems. Left, accuracy: nothing leaves the noise band, and pushing the judge harder (α 4 and 30) only costs points. Right, formalization: the two significant gains are real Lean inside the search on easy problems and the Qwen3 judge on hard problems. Beam search itself is worth +6 points over greedy on easy problems and +13 on hard, more than any judge added.</figcaption>
+<figcaption>Paired per problem against the search-only beam on the same 110 problems. Left, accuracy: nothing leaves the noise band, and pushing the judge harder (α 4 and 30) only costs points. Right, formalization: the significant gains are real Lean inside the search on easy problems, and the Qwen3 judge and the routed verifiers on hard problems. Beam search itself is worth +6 points over greedy on easy problems and +13 on hard, more than any judge added.</figcaption>
 </figure>
 
 <h2>4. Where a judge turns into answers: hard problems, whole trajectories</h2>
@@ -392,14 +392,14 @@ code{font-family:var(--mono);font-size:.92em}
 <rect x="604" y="160" width="262" height="46" rx="3" fill="none" stroke="#1b7f79" stroke-width="1.2"/>
 <text x="614" y="176">Python verifiability is the cleaner target</text><text x="614" y="190" opacity=".7">probe 0.78 vs 0.70; classifier 0.794 vs 0.753</text><text x="614" y="202" fill="#1b7f79" font-size="10.5">complete</text>
 <rect x="604" y="216" width="262" height="46" rx="3" fill="none" stroke="#7d8697" stroke-width="1.2" stroke-dasharray="4 3"/>
-<text x="614" y="232">Routed verifiers in the search</text><text x="614" y="246" opacity=".7">acc = control; +13 pts verified (indep.) on hard</text><text x="614" y="258" fill="#7d8697" font-size="10.5">hard-set Lean labels pending</text>
+<text x="614" y="232">Routed verifiers in the search</text><text x="614" y="246" opacity=".7">acc = control; +13 pts verified (indep.) on hard</text><text x="614" y="258" fill="#1b7f79" font-size="10.5">complete: Lean word share +5 pts hard, p=.032</text>
 <rect x="604" y="272" width="262" height="46" rx="3" fill="none" stroke="#a24a3c" stroke-width="1.2" stroke-dasharray="4 3"/>
 <text x="614" y="288">Natively verifiable CoT (SFT)</text><text x="614" y="302" opacity=".7">+12–13 pts vs step-native; tags learned; 52 problems</text><text x="614" y="314" fill="#a24a3c" font-size="10.5">needs a 10× data pool</text>
 <text x="604" y="345" font-size="11" opacity=".8">Shared methodology: real-Lean pipeline on fresh</text><text x="604" y="359" font-size="11" opacity=".8">generations, rendering and binder corrections.</text>
 </g>
 </svg>
 </div>
-<figcaption>Scope. Paper A is complete and its core is six measured claims; the appendix holds the supporting sweeps and the data-construction method. Paper B reuses Paper A's pipeline and judges, and two of its four pillars are done; the routed decode awaits one label set and the SFT result needs a training pool an order of magnitude larger before it can carry a claim.</figcaption>
+<figcaption>Scope. Paper A is complete and its core is six measured claims; the appendix holds the supporting sweeps and the data-construction method. Paper B reuses Paper A's pipeline and judges, and three of its four pillars are done; the SFT result needs a training pool an order of magnitude larger before it can carry a claim.</figcaption>
 </figure>
 
 <table>
@@ -417,7 +417,7 @@ code{font-family:var(--mono);font-size:.92em}
 <tr><td>TMLR</td><td class="pos">best fit as it stands</td><td>No deadline, values careful negative results and methodology, long format suits the corrections and the six-claim structure. The hard-problem lead is enough as a lead; it does not have to be a headline.</td></tr>
 <tr><td>Workshop: MATH-AI (NeurIPS/ICLR) or AI4Math (ICML)</td><td class="pos">near-certain acceptance</td><td>The transfer gap and the decoupling finding are exactly the cautionary results these audiences cite. Use it to get the result out early; the full paper goes to TMLR or a main track.</td></tr>
 <tr><td>Main track (NeurIPS / ICML / ICLR)</td><td class="neut">reachable with one replication</td><td>Needs the hard-problem rerank gain replicated on a second sample and ideally a second base model, so that the paper has a significant positive result alongside the nulls. About 60 GPU-hours and two weeks.</td></tr>
-<tr><td>Paper B venue</td><td class="neut">premature</td><td>Decide after the routed decode's Lean labels and a 10× SFT pool. If the SFT then writes more verifiable steps and holds accuracy, it is a main-track methods paper on its own; if not, the weak-verifier results fold into Paper A's discussion as a one-page section.</td></tr>
+<tr><td>Paper B venue</td><td class="neut">premature</td><td>Decide after a 10× SFT pool. If the SFT then writes more verifiable steps and holds accuracy, it is a main-track methods paper on its own; if not, the weak-verifier results fold into Paper A's discussion as a one-page section.</td></tr>
 </table>
 
 <div class="note"><strong>Projected value.</strong> Paper A is a reference people will cite when they build process rewards from formal verifiers: it shows the offline AUC does not transfer, what does, and where formalizability stops tracking correctness. That is a respected result rather than one people build on, which caps it at a well-cited analysis paper unless the hard-problem gain replicates. Paper B is where the upside is: refutation from cheap Python checks is the first signal in the programme that separates right from wrong reasoning on every set, and a generator that tags its own steps for the right verifier is a mechanism others would adopt. Its risk is the 22 to 31% sycophancy of the checker and the small training pool.</div>

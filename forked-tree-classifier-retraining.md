@@ -1557,4 +1557,18 @@ more Python-verifiable content than the search alone — +2.6 points on easy (n.
 hard (p < 0.0001)**, with the refuted share halved (0.10 vs 0.22) — so the gain is not only the
 decode-time checker approving its own picks. The stronger checker also verifies far more of every
 arm (0.69–0.90 vs 0.52–0.84 with the 30B model), which is the §13.1 coverage effect.
-ROUTED_LEAN_HARD_PLACEHOLDER
+**Real Lean on the chosen solutions — hard 109** (17.5 GPU-h for the last 1,103 labels):
+
+| hard 109, paired | `beam_lm` | `beam_routed` | better / worse | sign p | Wilcoxon p |
+|---|---|---|---|---|---|
+| step rate | 0.373 | 0.418 | 52 / 37 | 0.14 | **0.035** |
+| word share | 0.345 | 0.397 | 57 / 39 | 0.08 | **0.032** |
+| proved steps / solution | 4.50 | 4.82 | 47 / 36 | 0.27 | 0.087 |
+| correct | 0.385 | 0.385 | 9 / 9 | 1.0 | 1.0 |
+
+vs the Qwen3-classifier arm: step rate 0.408 → 0.418, word share 0.389 → 0.397 (49/51), correct 11/10 —
+indistinguishable. On hard problems the routed arm therefore raises *both* kinds of verified content
+over the search alone — Lean-proved word share +5.2 points (p = 0.032) and independently
+Python-checked share +13 points (p < 0.0001) — with 43 % shorter solutions (141 vs 249 words) and
+accuracy exactly at the control. It is the arm with the most verified content per solution in the
+project, and like every other arm it does not convert that into answers.
