@@ -1540,4 +1540,21 @@ routed arm matches the external judge's formalization and edges it on accuracy (
 problems the weak verifier in the loop gives: Lean-verified content about what the Qwen3 judge or
 Lean-in-the-loop gave (+2 points, n.s.), Python-verified content far above either (+17 points, by
 construction), and accuracy at or slightly above the control instead of below it.
+**Independent re-check** (Qwen3-Coder-Next, K = 4, a different model from the decode-time checker, on
+every step of the three arms' final solutions; `pyverify_routed/`):
+
+| set | arm | verified share | refuted share | refutation-free solutions | acc | vs routed: verified share W/L, Wilcoxon p | refutation-free W/L |
+|---|---|---|---|---|---|---|---|
+| easy 110 | **`beam_routed`** | **0.897** | **0.045** | **0.764** | 0.673 | — | — |
+| easy 110 | `beam_lm` | 0.871 | 0.076 | 0.645 | 0.655 | 31/20, p = 0.13 | 16/3 |
+| easy 110 | `beam_forked_qwen3` | 0.862 | 0.072 | 0.709 | 0.627 | 34/18, **p = 0.019** | 14/8 |
+| hard 109 | **`beam_routed`** | **0.822** | **0.099** | **0.468** | 0.385 | — | — |
+| hard 109 | `beam_lm` | 0.691 | 0.218 | 0.376 | 0.385 | 57/20, **p < 0.0001** | 16/6 |
+| hard 109 | `beam_forked_qwen3` | 0.736 | 0.183 | 0.385 | 0.376 | 49/27, **p = 0.0004** | 16/7 |
+
+Measured by a checker that did not take part in the search, the routed arm's solutions still carry
+more Python-verifiable content than the search alone — +2.6 points on easy (n.s.) and **+13 points on
+hard (p < 0.0001)**, with the refuted share halved (0.10 vs 0.22) — so the gain is not only the
+decode-time checker approving its own picks. The stronger checker also verifies far more of every
+arm (0.69–0.90 vs 0.52–0.84 with the 30B model), which is the §13.1 coverage effect.
 ROUTED_LEAN_HARD_PLACEHOLDER
