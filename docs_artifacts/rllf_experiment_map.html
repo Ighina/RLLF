@@ -1,0 +1,354 @@
+<title>RLLF Experiment Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; each figure is a full-width SVG mechanism drawing with a caption and a support table under it. */
+:root{
+  --bg:#f7f6f2; --fg:#1c2230; --muted:#5b6474; --rule:#d9d6cc; --panel:#eeece5;
+  --pos:#1b7f79; --neg:#a24a3c; --neut:#7d8697; --accent:#1f4e79;
+  --display:"Source Serif 4", Georgia, "Times New Roman", serif;
+  --body:"IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono:"IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --bg:#161a22; --fg:#e8e6df; --muted:#a3abba; --rule:#333a47; --panel:#1f242e; --pos:#5cc4bc; --neg:#e08572; --neut:#8a93a3; --accent:#8fb4dc; color-scheme:dark } }
+:root[data-theme="dark"]{ --bg:#161a22; --fg:#e8e6df; --muted:#a3abba; --rule:#333a47; --panel:#1f242e; --pos:#5cc4bc; --neg:#e08572; --neut:#8a93a3; --accent:#8fb4dc; color-scheme:dark }
+body{background:var(--bg);color:var(--fg);font-family:var(--body);line-height:1.5;margin:0;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:32px 64px}
+main{max-width:900px;margin:0 auto}
+h1{font-family:var(--display);font-weight:600;font-size:clamp(28px,4vw,38px);line-height:1.15;margin:0 0 8px;text-wrap:balance}
+h2{font-family:var(--display);font-weight:600;font-size:22px;margin:48px 0 8px;text-wrap:balance}
+p{max-width:68ch;margin:8px 0}
+.lede{color:var(--muted);font-size:16px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+figure{margin:20px 0 8px}
+.scroll{overflow-x:auto}
+svg{max-width:100%;height:auto;display:block;font-family:var(--body)}
+figcaption{font-size:14px;color:var(--muted);max-width:68ch;margin-top:8px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums;margin:10px 0 0}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:12px;letter-spacing:.04em;text-transform:uppercase}
+td.num{font-family:var(--mono);white-space:nowrap}
+.pos{color:var(--pos)} .neg{color:var(--neg)} .neut{color:var(--neut)}
+.key{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin:6px 0 0}
+.key span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.key .kp::before{background:var(--pos)} .key .kn::before{background:var(--neg)} .key .kq::before{background:var(--neut)}
+.note{background:var(--panel);border-left:3px solid var(--accent);padding:10px 14px;font-size:14px;max-width:68ch;margin:16px 0}
+code{font-family:var(--mono);font-size:.92em}
+</style>
+
+<main>
+<p class="eyebrow">RLLF · Lean-supervised process rewards · Sep–Nov 2026</p>
+<h1>RLLF Experiment Map</h1>
+<p class="lede">Every experiment of the programme as one mechanism: what labels a judge was trained on, where it read the step, how it steered decoding, and what moved. Numbers are the measured ones; green marks a result whose test or interval excludes zero, rust a loss, grey a null.</p>
+<p class="key"><span class="kp">significant gain</span><span class="kn">loss</span><span class="kq">null (within noise)</span></p>
+
+<h2>1. The chain, and where it broke</h2>
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 900 470" role="img" aria-label="Flow from label source to judge to decoder to outcome. FaithformBench labels train judges that do not transfer; in-generator Lean labels train judges that transfer; the Python weak verifier adds refutation. Every step-level steering arm lands on an accuracy null; trajectory rerank on hard problems and Lean in the loop are the two edges that move something.">
+<defs>
+<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+<marker id="arrg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1b7f79"/></marker>
+<marker id="arrr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#a24a3c"/></marker>
+</defs>
+<g fill="none" stroke="currentColor" stroke-width="1.2">
+<!-- column headers -->
+<g font-size="11" fill="currentColor" stroke="none" opacity=".7" font-weight="600" letter-spacing=".06em">
+<text x="90" y="22" text-anchor="middle">LABELS</text><text x="330" y="22" text-anchor="middle">JUDGE</text><text x="580" y="22" text-anchor="middle">DECODER</text><text x="810" y="22" text-anchor="middle">OUTCOME</text>
+</g>
+<!-- labels column -->
+<rect x="20" y="40" width="140" height="64" rx="4"/>
+<rect x="20" y="170" width="140" height="78" rx="4"/>
+<rect x="20" y="320" width="140" height="92" rx="4"/>
+<!-- judges column -->
+<rect x="250" y="40" width="160" height="64" rx="4"/>
+<rect x="250" y="150" width="160" height="78" rx="4"/>
+<rect x="250" y="250" width="160" height="64" rx="4"/>
+<rect x="250" y="340" width="160" height="72" rx="4"/>
+<!-- decoders column -->
+<rect x="500" y="40" width="160" height="52" rx="4"/>
+<rect x="500" y="120" width="160" height="66" rx="4"/>
+<rect x="500" y="214" width="160" height="52" rx="4"/>
+<rect x="500" y="294" width="160" height="52" rx="4"/>
+<rect x="500" y="372" width="160" height="52" rx="4"/>
+<!-- outcomes column -->
+<rect x="740" y="60" width="140" height="56" rx="4"/>
+<rect x="740" y="196" width="140" height="56" rx="4"/>
+<rect x="740" y="344" width="140" height="56" rx="4"/>
+</g>
+<!-- box text -->
+<g font-size="12" fill="currentColor">
+<text x="90" y="62" text-anchor="middle" font-weight="600">FaithformBench</text><text x="90" y="79" text-anchor="middle" font-size="11">27,816 step labels</text><text x="90" y="94" text-anchor="middle" font-size="11" opacity=".75">other models' steps</text>
+<text x="90" y="192" text-anchor="middle" font-weight="600">In-generator Lean</text><text x="90" y="209" text-anchor="middle" font-size="11">forked trees, 5,415 steps</text><text x="90" y="224" text-anchor="middle" font-size="11" opacity=".75">+ 15.5k more labelled later</text><text x="90" y="239" text-anchor="middle" font-size="11" opacity=".75">27.6% proved</text>
+<text x="90" y="342" text-anchor="middle" font-weight="600">Python weak verifier</text><text x="90" y="359" text-anchor="middle" font-size="11">20,964 steps, K=4 programs</text><text x="90" y="374" text-anchor="middle" font-size="11" opacity=".75">verified 39–55%</text><text x="90" y="389" text-anchor="middle" font-size="11" opacity=".75">refuted 27–31%</text><text x="90" y="404" text-anchor="middle" font-size="11" opacity=".75">sycophancy 22–31%</text>
+
+<text x="330" y="62" text-anchor="middle" font-weight="600">MiniLM / Qwen3 (bench)</text><text x="330" y="79" text-anchor="middle" font-size="11">offline AUC 0.80–0.86</text><text x="330" y="94" text-anchor="middle" font-size="11" fill="#a24a3c">on decoded steps 0.50–0.61</text>
+<text x="330" y="172" text-anchor="middle" font-weight="600">Qwen3-1.7B (in-gen)</text><text x="330" y="189" text-anchor="middle" font-size="11">held-out 0.75</text><text x="330" y="204" text-anchor="middle" font-size="11" fill="#1b7f79">OOD 0.65–0.74</text><text x="330" y="219" text-anchor="middle" font-size="11" opacity=".75">MiniLM: 0.69 / 0.57–0.63</text>
+<text x="330" y="272" text-anchor="middle" font-weight="600">Goedel probes</text><text x="330" y="289" text-anchor="middle" font-size="11">residual 0.70 / 0.58–0.78</text><text x="330" y="304" text-anchor="middle" font-size="11">heads 0.71 / 0.59–0.77</text>
+<text x="330" y="362" text-anchor="middle" font-weight="600">Python-verifiability judges</text><text x="330" y="379" text-anchor="middle" font-size="11">generator state 0.78</text><text x="330" y="394" text-anchor="middle" font-size="11">Qwen3-1.7B 0.794 (Lean: 0.753)</text>
+
+<text x="580" y="62" text-anchor="middle" font-weight="600">Step rerank</text><text x="580" y="79" text-anchor="middle" font-size="11">4 candidates, keep top</text>
+<text x="580" y="142" text-anchor="middle" font-weight="600">Classifier beam</text><text x="580" y="159" text-anchor="middle" font-size="11">4×2, α ∈ {1, 4, 10, 30}</text><text x="580" y="174" text-anchor="middle" font-size="11" opacity=".75">external, residual, head judges</text>
+<text x="580" y="236" text-anchor="middle" font-weight="600">Lean in the loop</text><text x="580" y="253" text-anchor="middle" font-size="11">hybrid, 11 Lean calls / problem</text>
+<text x="580" y="316" text-anchor="middle" font-weight="600">Trajectory rerank</text><text x="580" y="333" text-anchor="middle" font-size="11">pick 1 of 4–10 finished</text>
+<text x="580" y="394" text-anchor="middle" font-weight="600">Routed verifiers</text><text x="580" y="411" text-anchor="middle" font-size="11">Python → router → Lean → judge</text>
+
+<text x="810" y="82" text-anchor="middle" font-weight="600">Accuracy</text><text x="810" y="99" text-anchor="middle" font-size="11">MATH-500, 110 easy / 110 hard</text>
+<text x="810" y="218" text-anchor="middle" font-weight="600">Real formalization</text><text x="810" y="235" text-anchor="middle" font-size="11">Lean-proved word share</text>
+<text x="810" y="366" text-anchor="middle" font-weight="600">Verified content</text><text x="810" y="383" text-anchor="middle" font-size="11">Python-checked share</text>
+</g>
+<!-- edges: labels -> judges -->
+<g fill="none" stroke-width="1.4">
+<path d="M160 72 L250 72" stroke="#a24a3c" marker-end="url(#arrr)"/>
+<path d="M160 209 C205 209 205 189 250 189" stroke="#1b7f79" marker-end="url(#arrg)"/>
+<path d="M160 215 C205 215 205 282 250 282" stroke="#1b7f79" marker-end="url(#arrg)"/>
+<path d="M160 366 C205 366 205 376 250 376" stroke="#1b7f79" marker-end="url(#arrg)"/>
+</g>
+<g font-size="10.5" fill="currentColor" opacity=".85">
+<text x="205" y="64" text-anchor="middle">does not transfer</text>
+<text x="205" y="183" text-anchor="middle">transfers</text>
+<text x="205" y="300" text-anchor="middle">read Goedel's state</text>
+</g>
+<!-- edges: judges -> decoders -->
+<g fill="none" stroke="currentColor" stroke-width="1.2" opacity=".85">
+<path d="M410 72 L500 66" marker-end="url(#arr)"/>
+<path d="M410 189 L500 148" marker-end="url(#arr)"/>
+<path d="M410 282 L500 158" marker-end="url(#arr)"/>
+<path d="M410 196 C455 196 455 240 500 240" marker-end="url(#arr)"/>
+<path d="M410 203 C455 203 455 320 500 320" marker-end="url(#arr)"/>
+<path d="M410 376 C455 376 455 398 500 398" marker-end="url(#arr)"/>
+</g>
+<!-- edges: decoders -> outcomes -->
+<g fill="none" stroke-width="1.6">
+<path d="M660 66 L740 84" stroke="#7d8697" marker-end="url(#arr)"/>
+<path d="M660 153 L740 90" stroke="#7d8697" marker-end="url(#arr)"/>
+<path d="M660 240 C700 240 700 94 740 94" stroke="#7d8697" marker-end="url(#arr)"/>
+<path d="M660 320 C700 320 700 100 740 100" stroke="#1b7f79" marker-end="url(#arrg)"/>
+<path d="M660 398 C700 398 700 106 740 106" stroke="#7d8697" marker-end="url(#arr)"/>
+<path d="M660 160 C700 160 700 216 740 216" stroke="#7d8697" marker-end="url(#arr)"/>
+<path d="M660 246 C700 246 700 224 740 224" stroke="#1b7f79" marker-end="url(#arrg)"/>
+<path d="M660 404 C700 404 700 232 740 232" stroke="#7d8697" marker-end="url(#arr)"/>
+<path d="M660 410 C700 410 700 372 740 372" stroke="#1b7f79" marker-end="url(#arrg)"/>
+</g>
+<g font-size="10.5" fill="currentColor" opacity=".85">
+<text x="700" y="56" text-anchor="middle">−0.01 to −0.10</text>
+<text x="700" y="130" text-anchor="middle">null; α↑ hurts</text>
+<text x="700" y="296" text-anchor="middle" fill="#1b7f79">hard only: +0.075</text>
+<text x="700" y="212" text-anchor="middle" fill="#1b7f79">+6 pts, p=.004</text>
+<text x="700" y="434" text-anchor="middle" fill="#1b7f79">+13 pts hard, p&lt;.0001</text>
+</g>
+</svg>
+</div>
+<figcaption>The programme as one flow. Judges trained on FaithformBench do not survive the move to the generator's own steps; judges trained on in-generator Lean labels do, whatever they read. Yet every arm that steers the search step by step lands on an accuracy null. The three green edges are the only ones that moved a measured outcome: Lean in the loop on verified content, trajectory rerank on hard-problem accuracy, and the routed weak verifier on Python-checked content.</figcaption>
+</figure>
+
+<h2>2. The transfer gap, and what closes it</h2>
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 900 330" role="img" aria-label="Bar chart of step AUC against real Lean for five judges across five evaluation sets. Benchmark-trained judges sit at 0.5 to 0.64 everywhere; the in-generator Qwen3 classifier sits at 0.65 to 0.75; probes on the formalizer's state at 0.58 to 0.78.">
+<!-- axes: y from 0.45 at y=270 to 0.85 at y=50 -> 550px per 1.0 -->
+<g stroke="currentColor" stroke-width="1" opacity=".35">
+<line x1="60" y1="270" x2="880" y2="270"/>
+<line x1="60" y1="215" x2="880" y2="215" stroke-dasharray="3 4"/>
+<line x1="60" y1="160" x2="880" y2="160" stroke-dasharray="3 4"/>
+<line x1="60" y1="105" x2="880" y2="105" stroke-dasharray="3 4"/>
+<line x1="60" y1="50" x2="880" y2="50" stroke-dasharray="3 4"/>
+</g>
+<g font-size="11" fill="currentColor" opacity=".8" text-anchor="end">
+<text x="52" y="274">0.45</text><text x="52" y="219">0.55</text><text x="52" y="164">0.65</text><text x="52" y="109">0.75</text><text x="52" y="54">0.85</text>
+</g>
+<text x="18" y="160" font-size="11" fill="currentColor" opacity=".8" transform="rotate(-90 18 160)" text-anchor="middle">step AUC vs real Lean</text>
+<!-- chance line 0.50 at y=242.5 -->
+<line x1="60" y1="242.5" x2="880" y2="242.5" stroke="#a24a3c" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="876" y="238" font-size="10" fill="#a24a3c" text-anchor="end">chance</text>
+<!-- groups: 5 sets, each with 5 bars of width 22, gap 4; group width 130, start 80 -->
+<!-- values: [bench MiniLM, bench probe, in-gen MiniLM, Qwen3, Goedel residual probe] -->
+<!-- y = 270 - (v-0.45)*550 -->
+<g>
+<!-- held-out forked trees: 0.599, 0.64, 0.692, 0.753, 0.699 -->
+<rect x="80" y="188.1" width="22" height="81.9" fill="#a24a3c" opacity=".75"/><rect x="106" y="165.5" width="22" height="104.5" fill="#a24a3c" opacity=".45"/><rect x="132" y="136.9" width="22" height="133.1" fill="#7d8697"/><rect x="158" y="103.4" width="22" height="166.6" fill="#1b7f79"/><rect x="184" y="133.1" width="22" height="136.9" fill="#1f4e79" opacity=".8"/>
+<!-- easy beam steps: 0.642, 0.644, 0.631, 0.720, 0.707 -->
+<rect x="240" y="164.4" width="22" height="105.6" fill="#a24a3c" opacity=".75"/><rect x="266" y="163.3" width="22" height="106.7" fill="#a24a3c" opacity=".45"/><rect x="292" y="170.5" width="22" height="99.5" fill="#7d8697"/><rect x="318" y="121.5" width="22" height="148.5" fill="#1b7f79"/><rect x="344" y="128.7" width="22" height="141.3" fill="#1f4e79" opacity=".8"/>
+<!-- hard beam steps: 0.553, 0.58, 0.60*, 0.709, 0.692  (*MiniLM forked on hard beam not measured; use 0.60 as reported on own picks) -->
+<rect x="400" y="213.4" width="22" height="56.6" fill="#a24a3c" opacity=".75"/><rect x="426" y="198.5" width="22" height="71.5" fill="#a24a3c" opacity=".45"/><rect x="452" y="187.5" width="22" height="82.5" fill="#7d8697"/><rect x="478" y="127.6" width="22" height="142.4" fill="#1b7f79"/><rect x="504" y="136.9" width="22" height="133.1" fill="#1f4e79" opacity=".8"/>
+<!-- hard forked trees: 0.651, 0.614, 0.695, 0.742, 0.778 -->
+<rect x="560" y="159.5" width="22" height="110.5" fill="#a24a3c" opacity=".75"/><rect x="586" y="179.8" width="22" height="90.2" fill="#a24a3c" opacity=".45"/><rect x="612" y="135.3" width="22" height="134.7" fill="#7d8697"/><rect x="638" y="109.4" width="22" height="160.6" fill="#1b7f79"/><rect x="664" y="89.6" width="22" height="180.4" fill="#1f4e79" opacity=".8"/>
+<!-- natural CoT: 0.599, 0.582, 0.572, 0.654, 0.583 -->
+<rect x="720" y="188.1" width="22" height="81.9" fill="#a24a3c" opacity=".75"/><rect x="746" y="197.4" width="22" height="72.6" fill="#a24a3c" opacity=".45"/><rect x="772" y="202.9" width="22" height="67.1" fill="#7d8697"/><rect x="798" y="157.8" width="22" height="112.2" fill="#1b7f79"/><rect x="824" y="196.9" width="22" height="73.1" fill="#1f4e79" opacity=".8"/>
+</g>
+<g font-size="11" fill="currentColor" text-anchor="middle">
+<text x="143" y="290">held-out trees</text><text x="143" y="304" opacity=".7">980 steps</text>
+<text x="303" y="290">easy beam steps</text><text x="303" y="304" opacity=".7">2,547</text>
+<text x="463" y="290">hard beam steps</text><text x="463" y="304" opacity=".7">5,097</text>
+<text x="623" y="290">hard forked trees</text><text x="623" y="304" opacity=".7">3,786</text>
+<text x="783" y="290">natural CoT</text><text x="783" y="304" opacity=".7">1,556</text>
+</g>
+<!-- legend -->
+<g font-size="11" fill="currentColor">
+<rect x="80" y="22" width="12" height="12" fill="#a24a3c" opacity=".75"/><text x="98" y="32">bench. classifier</text>
+<rect x="200" y="22" width="12" height="12" fill="#a24a3c" opacity=".45"/><text x="218" y="32">bench. probe</text>
+<rect x="305" y="22" width="12" height="12" fill="#7d8697"/><text x="323" y="32">in-gen MiniLM</text>
+<rect x="420" y="22" width="12" height="12" fill="#1b7f79"/><text x="438" y="32">in-gen Qwen3-1.7B</text>
+<rect x="560" y="22" width="12" height="12" fill="#1f4e79" opacity=".8"/><text x="578" y="32">Goedel residual probe (in-gen)</text>
+</g>
+</svg>
+</div>
+<figcaption>Step AUC against real Lean on five evaluation sets, none used to fit any in-generator judge. Benchmark-trained judges, external or internal, hover near chance on the generator's steps; the same architectures trained on 4,435 in-generator labels transfer, and the 1.7B classifier is the best judge everywhere except the hard trees, where the formalizer's own state edges it. Distribution first, capacity second.</figcaption>
+</figure>
+<table>
+<tr><th>judge (fit on)</th><th>held-out trees</th><th>easy beam</th><th>hard beam</th><th>hard trees</th><th>natural CoT</th></tr>
+<tr><td>FaithformBench verifiability classifier</td><td class="num">0.599</td><td class="num">0.642</td><td class="num">0.553</td><td class="num">0.651</td><td class="num">0.599</td></tr>
+<tr><td>FaithformBench Goedel probe (proved, bare)</td><td class="num">0.638</td><td class="num">0.644</td><td class="num">0.580</td><td class="num">0.614</td><td class="num">0.582</td></tr>
+<tr><td>in-generator MiniLM (4,435 labels)</td><td class="num">0.692</td><td class="num">0.631</td><td class="num">0.600</td><td class="num">0.695</td><td class="num">0.572</td></tr>
+<tr><td>in-generator Qwen3-1.7B</td><td class="num pos">0.753</td><td class="num pos">0.720</td><td class="num pos">0.709</td><td class="num">0.742</td><td class="num pos">0.654</td></tr>
+<tr><td>Goedel residual probe, 4 layers × 2 anchors</td><td class="num">0.699</td><td class="num">0.707</td><td class="num">0.692</td><td class="num pos">0.778</td><td class="num">0.583</td></tr>
+<tr><td>Goedel head probe, 64 benchmark-selected heads</td><td class="num">0.707</td><td class="num">0.697</td><td class="num">0.686</td><td class="num">0.771</td><td class="num">0.586</td></tr>
+</table>
+
+<h2>3. Decoding: what each arm did to accuracy and formalization</h2>
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 900 420" role="img" aria-label="Two dot plots. Left: change in accuracy versus the search-only control for nine arms on easy and hard problems; all within noise, stronger steering negative. Right: change in Lean-proved word share; Lean in the loop and the Qwen3 judge on hard problems are the significant gains.">
+<g font-size="12" fill="currentColor" font-weight="600"><text x="230" y="24" text-anchor="middle">Δ accuracy vs search-only beam</text><text x="670" y="24" text-anchor="middle">Δ proved word share vs search-only beam</text></g>
+<!-- left panel: x from -0.12 (x=90) to +0.06 (x=390): 1666px per 1.0; zero at x=290 -->
+<g stroke="currentColor" opacity=".3" stroke-width="1"><line x1="90" y1="40" x2="90" y2="380"/><line x1="390" y1="40" x2="390" y2="380"/></g>
+<line x1="290" y1="40" x2="290" y2="380" stroke="currentColor" stroke-width="1.2"/>
+<g font-size="10.5" fill="currentColor" opacity=".8" text-anchor="middle"><text x="90" y="396">−0.12</text><text x="190" y="396">−0.06</text><text x="290" y="396">0</text><text x="390" y="396">+0.06</text></g>
+<!-- right panel: x from -0.04 (x=540) to +0.08 (x=840): 2500px per 1.0; zero at x=640 -->
+<g stroke="currentColor" opacity=".3" stroke-width="1"><line x1="540" y1="40" x2="540" y2="380"/><line x1="840" y1="40" x2="840" y2="380"/></g>
+<line x1="640" y1="40" x2="640" y2="380" stroke="currentColor" stroke-width="1.2"/>
+<g font-size="10.5" fill="currentColor" opacity=".8" text-anchor="middle"><text x="540" y="396">−0.04</text><text x="640" y="396">0</text><text x="740" y="396">+0.04</text><text x="840" y="396">+0.08</text></g>
+<!-- rows: y = 60 + i*36 ; label at x=20 -->
+<g font-size="11.5" fill="currentColor">
+<text x="20" y="64">MiniLM judge (forked), easy</text>
+<text x="20" y="100">Qwen3 judge, easy</text>
+<text x="20" y="136">Qwen3 judge α=4, easy</text>
+<text x="20" y="172">Qwen3 judge α=30, easy</text>
+<text x="20" y="208">residual probe, easy</text>
+<text x="20" y="244">Lean in the loop, easy</text>
+<text x="20" y="280">routed verifiers, easy</text>
+<text x="20" y="316">Qwen3 judge, hard</text>
+<text x="20" y="352">routed verifiers, hard</text>
+</g>
+<!-- left dots: Δacc values: +0.018, -0.028, -0.091, -0.100, -0.055, 0.000, +0.018, -0.009, 0.000 ; x = 290 + v*1666 -->
+<g>
+<circle cx="320" cy="60" r="6" fill="#7d8697"/><text x="332" y="64" font-size="10.5" fill="currentColor">+.018 (9/7)</text>
+<circle cx="243.4" cy="96" r="6" fill="#7d8697"/><text x="198" y="100" font-size="10.5" fill="currentColor" text-anchor="end">−.028 (8/11)</text>
+<circle cx="138.4" cy="132" r="6" fill="#a24a3c"/><text x="150" y="136" font-size="10.5" fill="currentColor">−.091 (8/18, p=.08)</text>
+<circle cx="123.4" cy="168" r="6" fill="#a24a3c"/><text x="135" y="172" font-size="10.5" fill="currentColor">−.100 (13/24, p=.10)</text>
+<circle cx="198.4" cy="204" r="6" fill="#7d8697"/><text x="210" y="208" font-size="10.5" fill="currentColor">−.055 (9/15)</text>
+<circle cx="290" cy="240" r="6" fill="#7d8697"/><text x="302" y="244" font-size="10.5" fill="currentColor">0 (11/11)</text>
+<circle cx="320" cy="276" r="6" fill="#7d8697"/><text x="332" y="280" font-size="10.5" fill="currentColor">+.018 (10/8)</text>
+<circle cx="275" cy="312" r="6" fill="#7d8697"/><text x="263" y="316" font-size="10.5" fill="currentColor" text-anchor="end">−.009 (7/8)</text>
+<circle cx="290" cy="348" r="6" fill="#7d8697"/><text x="302" y="352" font-size="10.5" fill="currentColor">0 (9/9)</text>
+</g>
+<!-- right dots: Δ word share: +0.012, +0.021, +0.022, n/a, -0.008, +0.058, +0.013, +0.044, pending(python +0.13 shown as note) ; x = 640 + v*2500 -->
+<g>
+<circle cx="670" cy="60" r="6" fill="#7d8697"/><text x="682" y="64" font-size="10.5" fill="currentColor">+.012 (p=.54)</text>
+<circle cx="692.5" cy="96" r="6" fill="#7d8697"/><text x="704" y="100" font-size="10.5" fill="currentColor">+.021 (p=.22)</text>
+<circle cx="695" cy="132" r="6" fill="#7d8697"/><text x="707" y="136" font-size="10.5" fill="currentColor">+.022 (n.s.)</text>
+<text x="640" y="172" font-size="10.5" fill="currentColor" opacity=".6" text-anchor="middle">not labelled</text>
+<circle cx="620" cy="204" r="6" fill="#7d8697"/><text x="608" y="208" font-size="10.5" fill="currentColor" text-anchor="end">−.008 (p=.68)</text>
+<circle cx="785" cy="240" r="6" fill="#1b7f79"/><text x="797" y="244" font-size="10.5" fill="#1b7f79">+.058 (p=.004)</text>
+<circle cx="672.5" cy="276" r="6" fill="#7d8697"/><text x="684" y="280" font-size="10.5" fill="currentColor">+.013 (p=.33)</text>
+<circle cx="750" cy="312" r="6" fill="#1b7f79"/><text x="762" y="316" font-size="10.5" fill="#1b7f79">+.044 (p=.018)</text>
+<text x="548" y="352" font-size="10.5" fill="currentColor" opacity=".8">Lean pending; Python-verified +.13 (p&lt;.0001, independent checker)</text>
+</g>
+</svg>
+</div>
+<figcaption>Paired per problem against the search-only beam on the same 110 problems. Left, accuracy: nothing leaves the noise band, and pushing the judge harder (α 4 and 30) only costs points. Right, formalization: the two significant gains are real Lean inside the search on easy problems and the Qwen3 judge on hard problems. Beam search itself is worth +6 points over greedy on easy problems and +13 on hard, more than any judge added.</figcaption>
+</figure>
+
+<h2>4. Where a judge turns into answers: hard problems, whole trajectories</h2>
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 900 300" role="img" aria-label="Two panels. Left: on easy problems, picking the trajectory with the highest true Lean rate is below random, 0.733 versus 0.753. Right: on hard problems it is above, 0.367 versus 0.308, and the Qwen3 judge's pick reaches 0.383 with a confidence interval excluding zero; weaker judges do not.">
+<g font-size="12" fill="currentColor" font-weight="600"><text x="230" y="24" text-anchor="middle">Easy (MATH-500 L1–3), 15 problems × 10 trajectories</text><text x="670" y="24" text-anchor="middle">Hard (MATH-500 L4–5), 60 problems × 4 trajectories</text></g>
+<!-- bars: accuracy of the picked trajectory; left scale 0.6..0.9 over y 240..60 (600px/1.0); right scale 0.2..0.5 over y 240..60 -->
+<g stroke="currentColor" opacity=".3"><line x1="60" y1="240" x2="420" y2="240"/><line x1="500" y1="240" x2="860" y2="240"/></g>
+<!-- left: random .753 -> y=240-(0.753-0.6)*600=148.2 ; true-rate oracle .733 -> 160.2 ; Qwen3 pick .667 -> 199.8 ; any-correct oracle ... skip -->
+<g>
+<rect x="90" y="148.2" width="70" height="91.8" fill="#7d8697"/><text x="125" y="142" font-size="11" fill="currentColor" text-anchor="middle">random .753</text><text x="125" y="258" font-size="11" fill="currentColor" text-anchor="middle">random pick</text>
+<rect x="200" y="160.2" width="70" height="79.8" fill="#a24a3c" opacity=".8"/><text x="235" y="154" font-size="11" fill="currentColor" text-anchor="middle">.733</text><text x="235" y="258" font-size="11" fill="currentColor" text-anchor="middle">true Lean rate</text><text x="235" y="272" font-size="10" fill="currentColor" opacity=".7" text-anchor="middle">(oracle score)</text>
+<rect x="310" y="199.8" width="70" height="40.2" fill="#a24a3c" opacity=".8"/><text x="345" y="193.8" font-size="11" fill="currentColor" text-anchor="middle">.667</text><text x="345" y="258" font-size="11" fill="currentColor" text-anchor="middle">Qwen3 judge pick</text><text x="345" y="272" font-size="10" fill="currentColor" opacity=".7" text-anchor="middle">−.087 [−.23, +.05]</text>
+</g>
+<!-- right: random .308 -> y=240-(0.308-0.2)*600=175.2 ; true rate .367 -> 139.8 ; Qwen3 .383 -> 130.2 ; residual probe .367 -> 139.8 ; MiniLM .333 -> 160.2 ; oracle .467 -> 79.8 -->
+<g>
+<rect x="510" y="175.2" width="52" height="64.8" fill="#7d8697"/><text x="536" y="169" font-size="11" fill="currentColor" text-anchor="middle">.308</text><text x="536" y="258" font-size="11" fill="currentColor" text-anchor="middle">random</text>
+<rect x="572" y="139.8" width="52" height="100.2" fill="#1b7f79" opacity=".55"/><text x="598" y="133.8" font-size="11" fill="currentColor" text-anchor="middle">.367</text><text x="598" y="258" font-size="11" fill="currentColor" text-anchor="middle">true Lean</text><text x="598" y="272" font-size="10" fill="currentColor" opacity=".7" text-anchor="middle">ρ=+.35</text>
+<rect x="634" y="130.2" width="52" height="109.8" fill="#1b7f79"/><text x="660" y="124.2" font-size="11" fill="currentColor" text-anchor="middle">.383</text><text x="660" y="258" font-size="11" fill="currentColor" text-anchor="middle">Qwen3 judge</text><text x="660" y="272" font-size="10" fill="#1b7f79" text-anchor="middle">+.075 [+.013, +.138]</text>
+<rect x="696" y="139.8" width="52" height="100.2" fill="#7d8697"/><text x="722" y="133.8" font-size="11" fill="currentColor" text-anchor="middle">.367</text><text x="722" y="258" font-size="11" fill="currentColor" text-anchor="middle">residual probe</text><text x="722" y="272" font-size="10" fill="currentColor" opacity=".7" text-anchor="middle">+.058 [−.004, +.121]</text>
+<rect x="758" y="160.2" width="52" height="79.8" fill="#7d8697"/><text x="784" y="154.2" font-size="11" fill="currentColor" text-anchor="middle">.333</text><text x="784" y="258" font-size="11" fill="currentColor" text-anchor="middle">MiniLM judge</text><text x="784" y="272" font-size="10" fill="currentColor" opacity=".7" text-anchor="middle">+.025 [−.06, +.11]</text>
+<line x1="500" y1="79.8" x2="860" y2="79.8" stroke="currentColor" stroke-dasharray="3 4" opacity=".6"/><text x="856" y="75" font-size="10.5" fill="currentColor" opacity=".8" text-anchor="end">any-correct oracle .467</text>
+</g>
+</svg>
+</div>
+<figcaption>Accuracy of the trajectory each score picks. On easy problems the true Lean rate itself selects worse than random, so no judge can help there. On hard problems the Lean rate predicts correctness, and the Qwen3 judge's pick is as good a proxy as the ground truth, recovering almost half the gap to the oracle. The weaker judges do not get there. One split of 60 problems: a lead, not yet a headline.</figcaption>
+</figure>
+
+<h2>5. The weak verifier: refutation is the signal Lean lacks</h2>
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 900 330" role="img" aria-label="Grouped bars: for steps that occur only in correct solutions versus only in wrong solutions, the Python refuted rate is 7 to 11 percent versus 32 to 45 percent, and the Lean proved rate 39 to 43 percent versus 9 to 23 percent. A side panel shows oracle trajectory picks: fewest refutations plus 9.5 points versus Lean rate plus 5.5.">
+<g font-size="12" fill="currentColor" font-weight="600"><text x="280" y="24" text-anchor="middle">Verdict rates by where the step occurs</text><text x="730" y="24" text-anchor="middle">Oracle trajectory pick, 150 MATH-train trees</text></g>
+<!-- left: 4 groups (MATH-train correct, MATH-train wrong, hard correct, hard wrong); 3 bars each: python verified, python refuted, Lean proved; scale 0..0.7 over y 250..60 (271px/1.0) -->
+<g stroke="currentColor" opacity=".3"><line x1="40" y1="250" x2="520" y2="250"/></g>
+<g font-size="10.5" fill="currentColor" opacity=".8" text-anchor="end"><text x="36" y="254">0</text><text x="36" y="173">.30</text><text x="36" y="92">.60</text></g>
+<!-- values v: y=250-v*271 -->
+<!-- MATH-train correct: .652 .109 .429 -->
+<rect x="60" y="73.3" width="26" height="176.7" fill="#1b7f79"/><rect x="90" y="220.5" width="26" height="29.5" fill="#a24a3c"/><rect x="120" y="133.7" width="26" height="116.3" fill="#1f4e79" opacity=".7"/>
+<!-- MATH-train wrong: .319 .316 .232 -->
+<rect x="180" y="163.6" width="26" height="86.4" fill="#1b7f79"/><rect x="210" y="164.4" width="26" height="85.6" fill="#a24a3c"/><rect x="240" y="187.1" width="26" height="62.9" fill="#1f4e79" opacity=".7"/>
+<!-- hard correct: .695 .065 .390 -->
+<rect x="300" y="61.7" width="26" height="188.3" fill="#1b7f79"/><rect x="330" y="232.4" width="26" height="17.6" fill="#a24a3c"/><rect x="360" y="144.3" width="26" height="105.7" fill="#1f4e79" opacity=".7"/>
+<!-- hard wrong: .145 .450 .093 -->
+<rect x="420" y="210.7" width="26" height="39.3" fill="#1b7f79"/><rect x="450" y="128.1" width="26" height="121.9" fill="#a24a3c"/><rect x="480" y="224.8" width="26" height="25.2" fill="#1f4e79" opacity=".7"/>
+<g font-size="10.5" fill="currentColor" text-anchor="middle">
+<text x="103" y="268">MATH-train</text><text x="103" y="282">only correct (945)</text>
+<text x="223" y="268">MATH-train</text><text x="223" y="282">only wrong (4,114)</text>
+<text x="343" y="268">hard</text><text x="343" y="282">only correct (154)</text>
+<text x="463" y="268">hard</text><text x="463" y="282">only wrong (1,562)</text>
+</g>
+<g font-size="11" fill="currentColor"><rect x="60" y="300" width="12" height="12" fill="#1b7f79"/><text x="78" y="310">Python verified</text><rect x="190" y="300" width="12" height="12" fill="#a24a3c"/><text x="208" y="310">Python refuted</text><rect x="320" y="300" width="12" height="12" fill="#1f4e79" opacity=".7"/><text x="338" y="310">Lean proved</text></g>
+<!-- right: oracle pick gains with CI; x scale -0.02..0.16 over x 600..860 (1444px/1.0); zero at 628.9 -->
+<g stroke="currentColor" opacity=".4"><line x1="628.9" y1="50" x2="628.9" y2="250"/></g>
+<g font-size="10.5" fill="currentColor" opacity=".8" text-anchor="middle"><text x="628.9" y="266">0</text><text x="773.3" y="266">+.10</text><text x="700" y="266">+.05</text></g>
+<g font-size="11" fill="currentColor" text-anchor="end">
+<text x="592" y="84">Lean proved rate</text><text x="592" y="124">Python verified rate</text><text x="592" y="164">verified − refuted</text><text x="592" y="204">fewest refutations</text>
+</g>
+<!-- Lean: +.055 [+.005,+.107] -> x=708.3, 636.1..783.4 -->
+<line x1="636.1" y1="80" x2="783.4" y2="80" stroke="currentColor" stroke-width="1.4"/><circle cx="708.3" cy="80" r="6" fill="#7d8697"/><text x="792" y="84" font-size="10.5" fill="currentColor">+.055</text>
+<!-- py verified: +.062 [+.013,+.110] -> 718.4, 647.7..787.7 -->
+<line x1="647.7" y1="120" x2="787.7" y2="120" stroke="currentColor" stroke-width="1.4"/><circle cx="718.4" cy="120" r="6" fill="#7d8697"/><text x="796" y="124" font-size="10.5" fill="currentColor">+.062</text>
+<!-- net: +.088 [+.035,+.140] -> 756, 679.4..831 -->
+<line x1="679.4" y1="160" x2="831" y2="160" stroke="currentColor" stroke-width="1.4"/><circle cx="756" cy="160" r="6" fill="#1b7f79"/><text x="839" y="164" font-size="10.5" fill="#1b7f79">+.088</text>
+<!-- norefute: +.095 [+.040,+.148] -> 766.1, 686.7..842.7 -->
+<line x1="686.7" y1="200" x2="842.7" y2="200" stroke="currentColor" stroke-width="1.4"/><circle cx="766.1" cy="200" r="6" fill="#1b7f79"/><text x="851" y="204" font-size="10.5" fill="#1b7f79">+.095</text>
+<text x="730" y="240" font-size="10.5" fill="currentColor" opacity=".8" text-anchor="middle">gain in pick accuracy over random, 95% bootstrap CI</text>
+</svg>
+</div>
+<figcaption>Left: a Python check written by a code model separates steps of wrong solutions from steps of correct ones mainly by refuting them, which the Lean pipeline essentially never does (2.3% of its failures are refutable). Right: as a trajectory-selection score on the 150 MATH-train trees, "fewest refutations" nearly doubles the Lean rate's gain. The checker's cost is sycophancy: it verifies 22 to 31% of claims with one number altered.</figcaption>
+</figure>
+<table>
+<tr><th>weak-verifier result</th><th>number</th><th>support</th></tr>
+<tr><td>Coverage, Qwen3-30B / Qwen3-Coder-Next</td><td class="num">39 / 55% verified; 27 / 31% refuted</td><td>20,964 steps, K=4 programs each; two checkers agree exactly on 64%</td></tr>
+<tr><td>Sycophancy on number-perturbed claims</td><td class="num neg">22.5% / 31%</td><td>300 controls; conditional on the unaltered source being verified</td></tr>
+<tr><td>Python verifiability readable from the generator's own state</td><td class="num pos">AUC 0.78 (Lean: 0.70)</td><td>held-out forked trees; 0.71 on natural CoT</td></tr>
+<tr><td>External Qwen3-1.7B on Python-verified</td><td class="num pos">0.794 (Lean target: 0.753)</td><td>same data, same architecture</td></tr>
+<tr><td>Two-stage router, 10% of steps to Lean</td><td class="num">precision 0.17–0.46 vs 0.07–0.27 random</td><td>probe on Goedel's state, AUC 0.63–0.75 for "Lean proves it" among Python-unverified steps</td></tr>
+<tr><td>Routed decode, independent re-check</td><td class="num pos">+13 pts Python-verified on hard, p&lt;.0001</td><td>Coder-Next, K=4; refuted share 0.10 vs 0.22; accuracy 0.385 = control</td></tr>
+<tr><td>Verifiable-CoT SFT, 118 trajectories</td><td class="num pos">0.709 / 0.373 vs step-native 0.591 / 0.255</td><td>greedy, easy / hard 110; tags learned: python-tagged steps verify 1.6× more often; lean tag uninformative</td></tr>
+</table>
+
+<h2>6. The corrections that moved the numbers</h2>
+<table>
+<tr><th>problem found</th><th>effect</th><th>fix</th></tr>
+<tr><td>Step cap of 6 zeroed trajectories</td><td class="num">19–52% of every arm ended with an empty answer</td><td>uncapped decoding; greedy on Qwen2.5-7B 0.360 → 0.664</td></tr>
+<tr><td>Formalizer saw the problem text</td><td class="num">33% of verdicts flip under step-level rendering</td><td>facts-only claim rendering; agreement 66.6%</td></tr>
+<tr><td>Regex dropped theorems with binders</td><td class="num">607 steps never reached the prover; 40.5% prove</td><td>fixed regex; every legacy rate +4 to +7 points, no ordering changed</td></tr>
+<tr><td>LaTeX answers graded wrong</td><td class="num">20 arms re-graded; +2 to +8 points</td><td>balanced-brace boxed extraction, sympy equivalence</td></tr>
+<tr><td>"Not proved" read as "false"</td><td class="num">2.3% of failures refutable</td><td>metric renamed in practice: provable by this pipeline</td></tr>
+</table>
+
+<div class="note">Budget to date: about 600 GPU-hours for the Lean programme, about 250 more for probes and the weak verifier. Every number here is in <code>results_consolidated.md</code> and sections 1 to 13 of <code>forked-tree-classifier-retraining.md</code>, with provenance.</div>
+</main>
