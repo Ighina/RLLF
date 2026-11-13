@@ -26,6 +26,34 @@ SYSTEM = ("You are solving a mathematics problem. Write the solution as a JSON l
           "Output only the JSON list.")
 
 
+def build_from_pool(args):
+    """Round 2: trajectories sampled from the round-1 model on MATH-train, kept if correct and no step is
+    Python-refuted; tags python (verified) | none; final answer = the short reference answer; at most
+    `--per-problem` per problem, most-verified first."""
+    verd = json.load(open(args.python_verdicts)); by_q = {}
+    from rllf.data.forked_tree import step_key
+    for line in open(args.pool):
+        r = json.loads(line)
+        if not r["correct"]: continue
+        ks = [step_key(r["question"], r["steps"][:i], s) for i, s in enumerate(r["steps"])]
+        if any(k not in verd for k in ks): continue
+        v = [verd[k]["verdict"] for k in ks]
+        if any(x == "refuted" for x in v): continue
+        tags = ["python" if x == "verified" else "none" for x in v]
+        share = tags.count("python") / len(tags)
+        if args.tags == "none": tags = ["none"] * len(tags)
+        body = [{"step": s, "verifier": g} for s, g in zip(r["steps"], tags)] + [{"final_answer": r["reference"]}]
+        by_q.setdefault(r["question"], []).append((share, {"question": r["question"], "completion": json.dumps(body, ensure_ascii=False), "level": r["level"], "n": len(ks), "tags": tags}))
+    out = []
+    for q, c in by_q.items():
+        seen = set()
+        for _, e in sorted(c, key=lambda x: -x[0]):
+            if e["completion"] in seen: continue
+            seen.add(e["completion"]); out.append(e)
+            if len(seen) >= args.per_problem: break
+    return out
+
+
 def build(args):
     R = Path("/scratch/users/iacopog/rllf-runs")
     verd = json.load(open(args.python_verdicts))["detail"] if "detail" in json.load(open(args.python_verdicts)) else json.load(open(args.python_verdicts))
@@ -54,13 +82,14 @@ def main(argv=None):
     p = argparse.ArgumentParser()
     p.add_argument("--base-model", default="Qwen/Qwen2.5-7B-Instruct")
     p.add_argument("--python-verdicts", default="/scratch/users/iacopog/rllf-runs/pyverify_30b/verdicts.json")
+    p.add_argument("--pool", default=None); p.add_argument("--per-problem", type=int, default=2)
     p.add_argument("--out", required=True); p.add_argument("--tags", default="heuristic", choices=["heuristic", "none"])
     p.add_argument("--epochs", type=int, default=4); p.add_argument("--learning-rate", type=float, default=1e-4)
     p.add_argument("--lora-r", type=int, default=16); p.add_argument("--lora-alpha", type=int, default=32)
     p.add_argument("--max-length", type=int, default=1536); p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda"); p.add_argument("--dry-run", action="store_true")
     args = p.parse_args(argv)
-    examples = build(args); random.Random(args.seed).shuffle(examples)
+    examples = build_from_pool(args) if args.pool else build(args); random.Random(args.seed).shuffle(examples)
     from collections import Counter
     print(f"{len(examples)} training trajectories over {len({e['question'] for e in examples})} problems; tags: {Counter(g for e in examples for g in e['tags'])}; levels: {Counter(e['level'] for e in examples)}", flush=True)
     print("--- sample ---\n", examples[0]["question"][:200], "\n", examples[0]["completion"][:600], "\n---", flush=True)

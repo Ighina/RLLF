@@ -28,6 +28,8 @@ term (α = 1, mean aggregation); hybrid = beam with real Lean on the judge's uns
 | full-trajectory rerank, forked Qwen3 judge (10 natural CoT trajectories) | Qwen2.5-7B | 15 (L1–3) | random pick 0.753 | 0.667 | −0.087 [−0.23, +0.05] | FT §8.4 |
 | full-trajectory rerank, forked Qwen3 judge (4 forked trajectories) | step-native Qwen2.5-7B | 30 held-out MATH-train trees | random 0.275 | 0.267 | ≈ 0 | FT §8.1 |
 | **full-trajectory rerank, forked Qwen3 judge** | step-native Qwen2.5-7B | **60 MATH-500 L4–5** | random 0.308 (oracle 0.467) | **0.383** | **+0.075 [+0.013, +0.138]** | FT §11.1 |
+| **replication**: same judge, 260 fresh L4–5 problems (71 MATH-500 rest + 189 MATH-test) | step-native Qwen2.5-7B | 260 | random 0.112 | 0.115 | +0.004 [−0.02, +0.03]; MATH-500 rest +0.056 [−0.01, +0.13]; pooled MATH-500 hard (131) **+0.065 [+0.015, +0.113]**; MATH-test −0.016 | FT §11.3 |
+| trajectory rerank by **real Python verdicts** (verified − refuted) | step-native Qwen2.5-7B | 260 | random 0.112 | 0.158 | **+0.046 [+0.017, +0.077]**; MATH-500 rest **+0.113 [+0.046, +0.183]** | FT §11.3 |
 | same, forked MiniLM judge / FaithformBench judge | step-native Qwen2.5-7B | 60 L4–5 | random 0.308 | 0.333 / 0.283 | +0.025 [−0.06, +0.11] / −0.025 | FT §11.1 |
 | beam, forked Qwen3 judge, α = 1 | step-native Qwen2.5-7B | **110 L4–5** | beam_lm 0.382 (greedy 0.255) | 0.373 | 7/8, p = 1.0 (beam vs greedy 24/10, p = 0.02) | FT §11.2 |
 

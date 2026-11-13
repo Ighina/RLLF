@@ -977,6 +977,45 @@ ceiling), the judge sees it (AUC, pick gain), and the way to cash it in is to re
 complete solutions — which is also the cheap operation (score N finished solutions once)
 rather than the expensive one (score 8 candidates per step).
 
+### 11.3 Replication of the hard-problem rerank on 260 fresh problems (Nov 12–14) — partial
+
+`hard2_forked_sample.py`: the 71 MATH-500 level-4/5 problems not in §11.1's sample plus 189 level-4/5
+problems of the MATH *test* split outside MATH-500 and FaithformBench (seed 0; the pool held 260, not the
+300 aimed for). 4 forked trajectories each from the same generator; 5 judges score every trajectory
+(`tree_judge_scores.py`); the 30B Python verifier checks all 15,493 unique steps. No Lean labels are needed
+for pick accuracy. 12 GPU-h. Accuracy of the trajectories: 11.2 % overall — 19.7 % on the MATH-500 rest,
+**7.9 % on MATH-test** (in line with the MATH-train trees' 17.5 % / 8.3 % at levels 4 / 5 under the same
+reference extraction; MATH-500's hard problems are the easier ones).
+
+| score | all 260: pick vs random 0.112 (oracle 0.254) | MATH-500 rest (71): vs 0.197 (oracle 0.408) | MATH-test (189): vs 0.079 (oracle 0.196) |
+|---|---|---|---|
+| Qwen3 Lean judge (§11.1's) | +0.004 [−0.023, +0.033] | +0.056 [−0.011, +0.127] | −0.016 [−0.044, +0.012] |
+| MiniLM Lean judge | +0.012 [−0.015, +0.040] | +0.014 [−0.053, +0.081] | +0.011 [−0.015, +0.038] |
+| FaithformBench classifier | +0.012 [−0.016, +0.039] | 0.000 [−0.056, +0.063] | +0.016 [−0.013, +0.048] |
+| Python-not-refuted classifier | +0.008 [−0.019, +0.036] | 0.000 [−0.067, +0.067] | +0.011 [−0.017, +0.040] |
+| **Python verified − refuted (real checks)** | **+0.046 [+0.017, +0.077]** | **+0.113 [+0.046, +0.183]** | +0.021 [−0.009, +0.053] |
+| fewest Python refutations (real checks) | **+0.038 [+0.012, +0.068]** | **+0.099 [+0.035, +0.165]** | +0.016 [−0.015, +0.048] |
+| Python verified rate (real checks) | **+0.035 [+0.007, +0.062]** | **+0.070 [+0.004, +0.141]** | +0.021 [−0.007, +0.052] |
+
+Pooled over the two MATH-500 hard samples (60 + 71 = 131 problems) the Qwen3 judge's gain is
+**+0.065 [+0.015, +0.113]**.
+
+Reading — the §11.1 result is narrower than it looked:
+
+1. **On MATH-500's hard problems the judge's gain holds up** (+0.056 on the fresh 71, same direction and
+   size as +0.075 on the first 60; pooled CI excludes zero). **On the harder MATH-test problems it is
+   absent** (−0.016, 9 better / 25 worse). Where 8 % of trajectories are correct, 80 % of problems have no
+   correct trajectory to pick, and the judge's mean-step score has nothing left that tracks the answer.
+   The claim "trajectory rerank with a learned Lean judge gains accuracy on hard problems" must be
+   restricted to the regime where the generator solves a fifth or more of the problems.
+2. **Real Python verdicts are the selection signal that replicates**: +4.6 points over all 260 problems
+   and +11.3 on the MATH-500 rest, CIs excluding zero — larger than any learned judge on any set in this
+   project, from a verifier that costs a code-model call per step. The learned *predictors* of Python
+   verdicts (the §13.4 classifiers) do not inherit it (≈ 0): the value is in running the check, not in
+   guessing its outcome.
+3. Lean labels for the 71 MATH-500-rest trees (oracle replication: does the true Lean rate predict
+   correctness there, ρ = +0.35 in §11.1) are running.
+
 ## 12. Internal-state probes as the step judge (Oct 25)
 
 `~/LeanSteer` fits linear probes on the residual stream of the four FaithformBench
