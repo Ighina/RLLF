@@ -1611,3 +1611,46 @@ over the search alone — Lean-proved word share +5.2 points (p = 0.032) and ind
 Python-checked share +13 points (p < 0.0001) — with 43 % shorter solutions (141 vs 249 words) and
 accuracy exactly at the control. It is the arm with the most verified content per solution in the
 project, and like every other arm it does not convert that into answers.
+
+### 13.7 Verifiable CoT, round 2 — a 4× pool filtered by the Python verifier alone (Nov 14)
+
+`launch_vcot2.sh`: the round-1 tag-free model samples 4 JSON solutions for 746 MATH-train problems
+(all the eligible pool held after excluding MATH-500 and FaithformBench; not the 2,000 aimed for); 1,242
+correct trajectories; the 30B verifier checks their 11,055 unique steps; kept: correct, no refuted step,
+≤ 2 per problem → **491 trajectories over 307 problems** (python 3,108 / none 877 tags; the `lean` class
+dropped per §13.6; `final_answer` = the short reference answer). Qwen2.5-7B-Instruct LoRA, 2 epochs, tagged
+and tag-free control; greedy decode; Python re-check of all 3,712 decoded steps. 5 GPU-h end to end.
+
+| model, greedy | easy 110 | hard 110 | steps/sol | tags (easy / hard) | python-tagged verified / refuted | none-tagged verified / refuted | solution verified share | refutation-free |
+|---|---|---|---|---|---|---|---|---|
+| base Qwen2.5-7B-Instruct, natural CoT (§9 uncapped, re-graded, same problems) | **0.845** | 0.527 | — | — | — | — | — | — |
+| base, self-consistency | 0.855 | 0.600 | | | | | | |
+| step-native SFT, beam 4 × 2 | 0.655 | 0.382 | 9.3 / 23.3 | — | — | — | 0.68 / 0.49 | 63 % / 35 % |
+| vCoT round 1, control (lenient grading) | 0.773 | 0.427 | 8.2 / 10.4 | — | — | 0.64 / 0.12 | 0.68 / 0.50 | 63 % / 36 % |
+| vCoT round 2, tag-free control | 0.727 | 0.445 | 7.9 / 10.7 | — | — | 0.62 / 0.11 ; 0.48 / 0.16 | 0.66 / 0.51 | 64 % / 42 % |
+| **vCoT round 2, tagged** | 0.782 | **0.564** | 7.7 / 10.2 | python 77 % / 61 % | **0.71 / 0.06 ; 0.58 / 0.16** | 0.27 / 0.17 ; 0.29 / 0.12 | 0.66 / 0.51 | 66 % / 44 % |
+
+Paired, tagged round 2 vs: its tag-free control — easy 13/7 (p = 0.26), **hard 18/5 (p = 0.011)**; round 1
+control — hard 24/9 (p = 0.014); step-native beam — easy 21/7 (p = 0.013), **hard 24/4 (p < 0.001)**; the
+base model's greedy — easy 8/15 (p = 0.21), hard 14/10 (p = 0.54).
+
+Reading:
+
+1. **Correction to §13.6's reading.** Round 1 did *not* "recover the base model's accuracy": on these exact
+   110 easy problems the un-fine-tuned Qwen2.5-7B-Instruct scores 0.845 greedy (the 0.664 quoted in §5.2 is
+   its all-250 figure). Every fine-tuned generator in this project — step-native (0.591 greedy), vCoT round 1
+   (0.71–0.77) — sat well below it. The honest baseline for the SFT line is the base model.
+2. **Round 2 closes that gap on hard problems and not yet on easy ones.** Tagged round 2 reaches 0.564 on
+   the hard set, above the base model's greedy 0.527 (14/10, n.s.) and within reach of its
+   self-consistency (0.600); on the easy set it is still 6 points under (0.782 vs 0.845, n.s.).
+3. **The verifier tags now help accuracy, significantly on hard problems** (0.564 vs 0.445 for the control
+   trained on the identical trajectories, 18/5, p = 0.011; +5.5 on easy, n.s.) — in round 1 they cost 6
+   points on easy. Writing, per step, whether it is checkable appears to act as a self-check; one seed,
+   one split — to be replicated before it is a claim.
+4. **Tags are sharper routers than in round 1**: python-tagged steps verify 0.71 / 0.58 and are refuted
+   0.06 / 0.16; none-tagged verify 0.27 / 0.29 (ratio 2.0–2.6×, up from 1.6×).
+5. **Still no more verifiable *content*:** the solutions' Python-verified share is unchanged across every
+   model (0.66 / 0.51); what moved is correctness and the share of refutation-free solutions on hard
+   problems (35 % → 44 %). Refutation again flags wrong solutions: a refuted step in 77–89 % of wrong
+   vs 23–32 % of correct ones.
+6. The format defect is fixed (≤ 2 of 110 final answers over 40 characters; strict grading throughout).
