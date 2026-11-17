@@ -977,7 +977,7 @@ ceiling), the judge sees it (AUC, pick gain), and the way to cash it in is to re
 complete solutions — which is also the cheap operation (score N finished solutions once)
 rather than the expensive one (score 8 candidates per step).
 
-### 11.3 Replication of the hard-problem rerank on 260 fresh problems (Nov 12–14) — partial
+### 11.3 Replication of the hard-problem rerank on 260 fresh problems (Nov 12–17) — partial replication
 
 `hard2_forked_sample.py`: the 71 MATH-500 level-4/5 problems not in §11.1's sample plus 189 level-4/5
 problems of the MATH *test* split outside MATH-500 and FaithformBench (seed 0; the pool held 260, not the
@@ -1013,8 +1013,14 @@ Reading — the §11.1 result is narrower than it looked:
    project, from a verifier that costs a code-model call per step. The learned *predictors* of Python
    verdicts (the §13.4 classifiers) do not inherit it (≈ 0): the value is in running the check, not in
    guessing its outcome.
-3. Lean labels for the 71 MATH-500-rest trees (oracle replication: does the true Lean rate predict
-   correctness there, ρ = +0.35 in §11.1) are running.
+3. **The Lean-rate oracle replicates on the fresh 71** (3,486 unique steps real-Lean labelled, 18.0 % proved,
+   ~75 GPU-h over two jobs): picking by the true Lean rate gives 0.254 vs random 0.197, **+0.056
+   [−0.011, +0.127]**, within-problem ρ = +0.20 over 27 problems — the same +0.058 as the first 60. Pooled
+   over the 131 MATH-500 hard problems: **+0.057 [+0.010, +0.107]**. On the same 71 problems the real
+   Python verdicts give +0.113 [+0.046, +0.183] (ρ = +0.32), twice the Lean oracle, and adding the Lean
+   rate to them does not help (+0.085). The Qwen3 judge's pick gains accuracy there (+0.056) while its
+   gain in true Lean rate is only +0.011 [−0.011, +0.033] (first sample: +0.060): what the judge's score
+   shares with correctness on hard problems is not mainly Lean provability.
 
 ## 12. Internal-state probes as the step judge (Oct 25)
 
