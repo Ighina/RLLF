@@ -14,8 +14,12 @@ each step with the verifier that applies, which helps accuracy on hard problems.
 - Verifiable-CoT SFT round 1 and round 2 (§13.6, §13.7)
 - Trajectory rerank by real Python verdicts on 260 fresh hard problems (§11.3)
 
+## Replication outcome (§13.8)
+- Tag effect: small on easy problems (+4–5 pts, pooled p = 0.031), absent on hard (the +12 was one seed/split).
+- Every SFT generator is 12–17 points below the un-fine-tuned base model with a plain prompt (0.900 / 0.645).
+- Consequence: apply the verifier to the *base* model's solutions (selection, self-consistency weighting) rather than fine-tune.
+
 ## Running / queued
-- Second seed + second evaluation split for the tag effect; base model on both splits (`launch_vcot2_seed.sh`)
 - OpenJev zero-shot three-way router on all labelled steps (`openjev_router.py`)
 
 ## Notes

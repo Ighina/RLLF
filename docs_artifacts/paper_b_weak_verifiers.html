@@ -125,16 +125,17 @@ code{font-family:var(--mono);font-size:.92em}
 <tr><td>Routed-verifier beam search, verified content on hard problems</td><td class="num pos">Python-checked +13 pts (p&lt;.0001); Lean word share +5 pts (p=.032)</td><td>independent checker; refuted share 0.10 vs 0.22; solutions 43% shorter</td></tr>
 <tr><td>Verifiable-CoT SFT, round 1 (118 trajectories)</td><td class="num neut">0.645 / 0.382 tagged; 0.709 / 0.373 control</td><td>tags learned; python-tagged steps verify 1.6× more often; lean tag uninformative</td></tr>
 <tr><td>Verifiable-CoT SFT, round 2 (491 Python-filtered trajectories)</td><td class="num pos">0.782 / 0.564 tagged vs 0.727 / 0.445 control</td><td>hard: 18 wins, 5 losses, p=.011; vs step-native beam 24/4; python-tagged steps verify 2.0–2.6× more often</td></tr>
-<tr><td>Baseline to beat: un-fine-tuned Qwen2.5-7B-Instruct, greedy</td><td class="num">0.845 / 0.527</td><td>round 2 tagged matches it on hard (14/10) and is 6 points short on easy</td></tr>
+<tr><td>Tag effect, 2 seeds × 2 evaluation splits</td><td class="num neut">easy +4 to +5 pts in 4 of 4 cells (49/29, p=.031); hard 43/34, p=.36</td><td>the +12 points on hard problems was one seed on one split; the other three hard cells give 0, 0 and −4</td></tr>
+<tr><td>Baseline: un-fine-tuned Qwen2.5-7B-Instruct, plain prompt, greedy</td><td class="num neg">0.900 / 0.645; second split 0.855 / 0.336</td><td>every fine-tuned generator is 12–17 points below it and loses the paired test in 7 of 8 cells</td></tr>
 </table>
 <h2>4. Status and open experiments</h2>
 <table>
 <tr><th>item</th><th>state</th></tr>
-<tr><td>Second seed and second evaluation split for the tag effect, with the base model on both splits</td><td class="neut">running</td></tr>
+<tr><td>Second seed and second evaluation split for the tag effect, with the base model on both splits</td><td class="neg">done: hard-problem effect did not replicate; fine-tunes sit below the base model</td></tr>
 <tr><td>OpenJev as a zero-shot three-way router (Lean / Python / none) on all 20,964 labelled steps</td><td class="neut">running</td></tr>
 <tr><td>Context in verification</td><td class="pos">already the default: Lean sees previous steps as hypotheses; Python sees the problem and previous steps</td></tr>
 <tr><td>Risk: checker sycophancy</td><td class="neg">22–31% of number-perturbed claims verified</td></tr>
 <tr><td>Risk: no gain in verifiable content from SFT</td><td class="neg">verified share unchanged at 0.66 / 0.51 across all generators</td></tr>
 </table>
-<div class="note"><strong>Target.</strong> A main-track methods paper if the tag effect survives the second seed and split. If it does not, the selection result (real Python verdicts, +.046 on 260 problems) and the routed search still make a workshop paper.</div>
+<div class="note"><strong>Target.</strong> The tag effect did not survive replication on hard problems and the fine-tuned generators sit below their base model, so the SFT line cannot carry the paper as it stands. What holds is the verifier itself: refutation as a correctness signal, trajectory selection by real Python verdicts (+.046 on 260 problems), and routed search that raises verified content. That is a workshop paper now; a main-track version needs the verifier applied to the un-fine-tuned base model's solutions, where the accuracy is.</div>
 </main>

@@ -1660,3 +1660,38 @@ Reading:
    problems (35 % → 44 %). Refutation again flags wrong solutions: a refuted step in 77–89 % of wrong
    vs 23–32 % of correct ones.
 6. The format defect is fixed (≤ 2 of 110 final answers over 40 characters; strict grading throughout).
+
+### 13.8 Second seed, second split, and a proper base-model baseline (Nov 18) — the tag effect is small, and the SFT line is below the base model
+
+`launch_vcot2_seed.sh`: tagged and tag-free models retrained with seed 1 on the same 491 trajectories; both
+seeds decoded on the original easy / hard 110 and on a second split of 110 level-1–3 and 110 level-4/5
+MATH-test problems outside MATH-500 and FaithformBench; the un-fine-tuned Qwen2.5-7B-Instruct decoded
+greedily on all four sets with a plain "solve step by step, box the answer" prompt (`base_decode.py`). 0.5 GPU-h.
+
+| set | seed | tagged | control | tagged vs control (W/L, p) | base model | tagged vs base (W/L, p) |
+|---|---|---|---|---|---|---|
+| easy 110 | 0 | 0.782 | 0.727 | 13/7, 0.26 | **0.900** | 4/17, 0.007 |
+| easy 110 | 1 | 0.773 | 0.736 | 11/7, 0.48 | **0.900** | 0/14, < 0.001 |
+| hard 110 | 0 | 0.564 | 0.445 | 18/5, 0.011 | **0.645** | 8/17, 0.11 |
+| hard 110 | 1 | 0.445 | 0.445 | 12/12, 1.0 | **0.645** | 7/29, < 0.001 |
+| split 2 easy | 0 | 0.727 | 0.691 | 13/9, 0.52 | **0.855** | 4/18, 0.004 |
+| split 2 easy | 1 | 0.727 | 0.673 | 12/6, 0.24 | **0.855** | 4/18, 0.004 |
+| split 2 hard | 0 | 0.164 | 0.164 | 7/7, 1.0 | **0.336** | 5/24, 0.001 |
+| split 2 hard | 1 | 0.136 | 0.173 | 6/10, 0.45 | **0.336** | 2/24, < 0.001 |
+
+Pooled tagged vs control: all cells 92/63 (p = 0.024); easy cells 49/29 (p = 0.031); hard cells 43/34 (p = 0.36).
+
+Reading — two corrections to §13.7:
+
+1. **The +12-point tag effect on hard problems was one seed on one split.** It is 0, 0 and −4 points in
+   the other three hard cells. What is consistent is a small effect on easy problems, +3.6 to +5.5 points
+   in all four cells (pooled 49/29, p = 0.031). Tagging each step with its verifier helps a little where
+   steps are checkable, and not on hard problems.
+2. **Every fine-tuned generator is well below the un-fine-tuned base model.** With a plain prompt the base
+   model scores 0.900 / 0.645 on the original sets (above the 0.845 / 0.527 of the project's earlier
+   decoder) and 0.855 / 0.336 on the second split; the best SFT model is 12–17 points below it on every set
+   and loses the paired comparison significantly in 7 of 8 cells. §13.7's "reaches the base model on hard
+   problems" does not hold against this baseline. Fine-tuning a 7B model on a few hundred of its own
+   filtered trajectories in a JSON step format costs more than the filter gives back — as the step-native
+   fine-tune did (§5.2). The verifiable-CoT idea needs either far more data or a format imposed without
+   fine-tuning (prompted tags, or tagging done by a separate router) before it can be claimed to help.
