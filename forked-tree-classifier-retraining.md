@@ -1695,3 +1695,80 @@ Reading — two corrections to §13.7:
    filtered trajectories in a JSON step format costs more than the filter gives back — as the step-native
    fine-tune did (§5.2). The verifiable-CoT idea needs either far more data or a format imposed without
    fine-tuning (prompted tags, or tagging done by a separate router) before it can be claimed to help.
+
+### 13.9 Is the base model's advantage memorisation of MATH? — no (Nov 18)
+
+Hypothesis: the un-fine-tuned Qwen2.5-7B-Instruct beats the SFT generators on MATH-500 because it has seen
+MATH. Test: the same five models (base; tagged and tag-free round-2 SFT, two seeds each), greedy, on sets
+off MATH (`novel_eval.py`; only locally cached datasets plus FinChain, whose templates generate fresh instances):
+
+| set | n | base | tagged s0 / s1 | control s0 / s1 | novelty |
+|---|---|---|---|---|---|
+| FinChain (fresh instances from symbolic templates, 55 topics) | 400 | **0.748** | 0.585 / 0.540 | 0.580 / 0.547 | generated now — cannot be memorised |
+| AIME 2026 (MathArena) | 30 | **0.067** | 0.033 / 0.000 | 0.000 / 0.000 | released after the base model |
+| Omni-MATH, difficulty ≤ 3 | 150 | **0.660** | 0.587 / 0.513 | 0.600 / 0.587 | olympiad-style, benchmark Oct 2024 (problems older) |
+| Omni-MATH, difficulty 4–6 | 150 | **0.180** | 0.127 / 0.127 | 0.093 / 0.100 | as above |
+| GSM8K test (old control) | 200 | **0.905** | 0.845 / 0.820 | 0.875 / 0.810 | old |
+| LiveCodeBench, AtCoder Mar–May 2024, public tests | 57 | **0.421** | 0.158 / 0.175 | 0.140 / 0.140 | near the base model's cutoff; SFT never saw code |
+| (MATH-500 easy / hard, §13.8) | 110 / 110 | 0.900 / 0.645 | 0.78 / 0.56, 0.77 / 0.45 | 0.73 / 0.45, 0.74 / 0.45 | old |
+
+(FinChain grading is a proxy: the gold final number must appear, within 1 %, in the stated answer or closing
+lines; identical for all models. MATH-Perturb and the MathArena 2025 sets are not on this machine.)
+
+**The base model wins everywhere, by the same 6–17 points on instances that cannot have been memorised
+(FinChain: 0.75 vs 0.55–0.59) as on MATH-500.** The gap is not a contamination artefact; the SFT on a few
+hundred JSON-formatted trajectories degrades the model's problem solving in general, most of all off its
+training format (code: 0.42 → 0.14–0.18). Tags make no consistent difference off MATH either.
+
+### 13.10 The verifier on the base model's own solutions: reranker and self-consistency weight (Nov 18)
+
+`base_sc_sample.py`: base model, plain prompt, 8 samples (T = 0.8) per problem on the original easy / hard 110;
+each sample retro-segmented by the same model (10.9 steps on average); the 30B Python verifier on the 18,775
+unique steps (verified 50.5 %, refuted 9.8 %). 1.1 GPU-h.
+
+| selection over the 8 samples | easy 110 | hard 110 | vs self-consistency (W/L) |
+|---|---|---|---|
+| greedy (single solution) | 0.900 | 0.645 | 2/5 ; **0/15** |
+| random sample | 0.886 | 0.653 | |
+| **self-consistency (majority answer)** | 0.927 | **0.782** | — |
+| SC weighted by exp(2 · (verified − refuted)) | 0.945 | 0.782 | 2/0 ; 2/2 |
+| SC weighted by (1 − refuted share) | 0.927 | 0.773 | 1/1 ; 0/1 |
+| SC over refutation-free samples only | 0.909 | 0.755 | 1/3 ; 2/5 |
+| verifier rerank: best verified − refuted | 0.909 | 0.745 | 1/3 ; 4/8 |
+| verifier rerank: fewest refutations | 0.900 | 0.727 | 1/4 ; 3/9 |
+| oracle (any sample correct) | 0.964 | 0.845 | |
+
+A sample containing a refuted step is wrong far more often than not (refuted step in 63–70 % of wrong samples
+vs 26–28 % of correct ones), so the verifier reranker beats a random sample by +9 points on hard problems
+(0.745 vs 0.653) — the §11.3 selection effect, now on the strong base model. **But answer agreement is the
+better signal when several samples are available:** plain self-consistency reaches 0.782 and no verifier
+weighting improves on it (best: 0.945 vs 0.927 on easy, 2/0). The weak verifier's practical niche is
+therefore where agreement is unavailable — a single solution to accept or reject, free-form answers that do
+not cluster, or selecting among few trajectories — not as a replacement for voting.
+
+### 13.11 OpenJev as a zero-shot three-way router (Nov 18)
+
+`openjev_router.py`: the decision model `openjev/openjev` is asked, for each of the 20,964 labelled steps
+(current step, previous steps, problem), to choose **lean** (formalisable abstract mathematical/logical claim),
+**python** (computational or not formalisable) or **none** (unverifiable: assumption, definition, plan); option
+probabilities read from the first output position (JevBeam's readout). 1.8 GPU-h. Routes: lean 39 %,
+python 51 %, none 10 %.
+
+| set | Python-verified given route L / P / N | Lean-proved given route L / P / N | verified by the routed verifier | always Python | oracle | AUC p(lean) → Lean proves, among Python-unverified | AUC p(python) → Python verifies |
+|---|---|---|---|---|---|---|---|
+| MATH-train trees | 0.38 / 0.41 / 0.29 | 0.27 / 0.29 / 0.26 | 0.303 | 0.387 | 0.493 | 0.513 | 0.547 |
+| easy beam | 0.48 / 0.61 / 0.39 | 0.37 / 0.47 / 0.33 | 0.452 | 0.535 | 0.661 | 0.538 | 0.577 |
+| hard beam | 0.26 / 0.32 / 0.19 | 0.21 / 0.21 / 0.13 | 0.239 | 0.282 | 0.370 | 0.562 | 0.570 |
+| hard trees | 0.25 / 0.24 / 0.36 | 0.16 / 0.13 / 0.17 | 0.205 | 0.249 | 0.298 | 0.630 | 0.467 |
+| natural CoT | 0.67 / 0.73 / 0.42 | 0.54 / 0.65 / 0.42 | 0.513 | 0.641 | 0.801 | 0.349 | 0.653 |
+
+Reading: **the semantic routing criterion does not predict which verifier succeeds.** Steps OpenJev sends to
+Lean are not more Lean-provable than those it sends to Python (0.28 vs 0.31 overall; AUC of p(lean) for "Lean
+proves what Python could not" 0.51–0.63, and 0.35 on natural CoT), and steps it sends to Python are only
+slightly more Python-verifiable (0.42 vs 0.37; AUC 0.47–0.65). Following its routes verifies *fewer* steps than
+always running Python (0.32 vs 0.39). As the stage-2 score of the two-stage router it sends Lean steps that
+prove 0.13–0.35 of the time (random 0.07–0.27) — a real but smaller lift than the trained Goedel-state probe
+(0.17–0.46, §13.3). Its `none` route is the informative one: those steps are least verifiable by either
+(AUC 0.60–0.72 for "neither verifier succeeds" on four of five sets). "Formalisable" as judged from the text
+and "provable by this pipeline" are different properties — which verifier works is an empirical fact about the
+checker, better learned from its verdicts than read off the step's type.

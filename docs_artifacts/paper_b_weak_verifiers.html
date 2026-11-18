@@ -132,10 +132,12 @@ code{font-family:var(--mono);font-size:.92em}
 <table>
 <tr><th>item</th><th>state</th></tr>
 <tr><td>Second seed and second evaluation split for the tag effect, with the base model on both splits</td><td class="neg">done: hard-problem effect did not replicate; fine-tunes sit below the base model</td></tr>
-<tr><td>OpenJev as a zero-shot three-way router (Lean / Python / none) on all 20,964 labelled steps</td><td class="neut">running</td></tr>
+<tr><td>OpenJev as a zero-shot three-way router (Lean / Python / none) on all 20,964 labelled steps</td><td class="neg">done: routes do not predict which verifier succeeds (AUC .51–.63); following them verifies 0.32 of steps vs 0.39 for always-Python; only the "none" route is informative</td></tr>
+<tr><td>Memorisation check: base vs fine-tuned models off MATH</td><td class="neg">done: base leads on fresh FinChain instances 0.75 vs 0.55–0.59, and on AIME 2026, Omni-MATH, GSM8K and code; the gap is not contamination</td></tr>
+<tr><td>Verifier on the base model's own 8 samples, MATH-500</td><td class="neut">done: rerank beats a random sample by +9 pts on hard (0.745 vs 0.653) but not self-consistency (0.782); verifier-weighted voting equals plain voting</td></tr>
 <tr><td>Context in verification</td><td class="pos">already the default: Lean sees previous steps as hypotheses; Python sees the problem and previous steps</td></tr>
 <tr><td>Risk: checker sycophancy</td><td class="neg">22–31% of number-perturbed claims verified</td></tr>
 <tr><td>Risk: no gain in verifiable content from SFT</td><td class="neg">verified share unchanged at 0.66 / 0.51 across all generators</td></tr>
 </table>
-<div class="note"><strong>Target.</strong> The tag effect did not survive replication on hard problems and the fine-tuned generators sit below their base model, so the SFT line cannot carry the paper as it stands. What holds is the verifier itself: refutation as a correctness signal, trajectory selection by real Python verdicts (+.046 on 260 problems), and routed search that raises verified content. That is a workshop paper now; a main-track version needs the verifier applied to the un-fine-tuned base model's solutions, where the accuracy is.</div>
+<div class="note"><strong>Target.</strong> The tag effect did not survive replication on hard problems and the fine-tuned generators sit below their base model, so the SFT line cannot carry the paper as it stands. What holds is the verifier itself: refutation as a correctness signal, trajectory selection by real Python verdicts (+.046 on 260 problems), and routed search that raises verified content. Applied to the un-fine-tuned base model's own samples, the verifier beats a random pick but not majority voting, so its niche is where agreement is unavailable: accepting or rejecting a single solution, or free-form answers that do not cluster. That is a workshop paper as it stands.</div>
 </main>
