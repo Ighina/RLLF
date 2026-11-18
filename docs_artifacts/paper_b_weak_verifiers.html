@@ -1,0 +1,140 @@
+<title>Weak Verifiers Paper</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; each figure is a full-width SVG mechanism drawing with a caption and a support table under it. */
+:root{
+  --bg:#f7f6f2; --fg:#1c2230; --muted:#5b6474; --rule:#d9d6cc; --panel:#eeece5;
+  --pos:#1b7f79; --neg:#a24a3c; --neut:#7d8697; --accent:#1f4e79;
+  --display:"Source Serif 4", Georgia, "Times New Roman", serif;
+  --body:"IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono:"IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --bg:#161a22; --fg:#e8e6df; --muted:#a3abba; --rule:#333a47; --panel:#1f242e; --pos:#5cc4bc; --neg:#e08572; --neut:#8a93a3; --accent:#8fb4dc; color-scheme:dark } }
+:root[data-theme="dark"]{ --bg:#161a22; --fg:#e8e6df; --muted:#a3abba; --rule:#333a47; --panel:#1f242e; --pos:#5cc4bc; --neg:#e08572; --neut:#8a93a3; --accent:#8fb4dc; color-scheme:dark }
+body{background:var(--bg);color:var(--fg);font-family:var(--body);line-height:1.5;margin:0;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:32px 64px}
+main{max-width:900px;margin:0 auto}
+h1{font-family:var(--display);font-weight:600;font-size:clamp(28px,4vw,38px);line-height:1.15;margin:0 0 8px;text-wrap:balance}
+h2{font-family:var(--display);font-weight:600;font-size:22px;margin:48px 0 8px;text-wrap:balance}
+p{max-width:68ch;margin:8px 0}
+.lede{color:var(--muted);font-size:16px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+figure{margin:20px 0 8px}
+.scroll{overflow-x:auto}
+svg{max-width:100%;height:auto;display:block;font-family:var(--body)}
+figcaption{font-size:14px;color:var(--muted);max-width:68ch;margin-top:8px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums;margin:10px 0 0}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:12px;letter-spacing:.04em;text-transform:uppercase}
+td.num{font-family:var(--mono);white-space:nowrap}
+.pos{color:var(--pos)} .neg{color:var(--neg)} .neut{color:var(--neut)}
+.key{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin:6px 0 0}
+.key span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.key .kp::before{background:var(--pos)} .key .kn::before{background:var(--neg)} .key .kq::before{background:var(--neut)}
+.note{background:var(--panel);border-left:3px solid var(--accent);padding:10px 14px;font-size:14px;max-width:68ch;margin:16px 0}
+code{font-family:var(--mono);font-size:.92em}
+</style>
+
+<main>
+<p class="eyebrow">Paper B · in progress · weak verifiers for reasoning steps</p>
+<h1>Weak Verifiers Paper</h1>
+<p class="lede">Python checks written by a code model as a second, cheaper verifier beside Lean: what they catch, how to route between verifiers, and a generator that tags each step with the verifier that applies. Working folder: <code>papers/weak_verifiers/</code>.</p>
+<p class="key"><span class="kp">significant gain</span><span class="kn">loss / risk</span><span class="kq">null or pending</span></p>
+<h2>1. The mechanism</h2>
+<figure><div class="scroll">
+<svg viewBox="0 0 900 250" role="img" aria-label="Pipeline: a generator writes a step; a code model writes Python checks that verify, refute or leave it unknown; refuted steps are pruned; unknown steps go to a router that sends some to Lean; verdicts filter training trajectories for a generator that tags each step with its verifier.">
+<defs><marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+<g fill="none" stroke="currentColor" stroke-width="1.2">
+<rect x="20" y="80" width="130" height="60" rx="4"/><rect x="210" y="80" width="150" height="60" rx="4"/><rect x="430" y="20" width="140" height="46" rx="4"/><rect x="430" y="88" width="140" height="46" rx="4"/><rect x="430" y="156" width="140" height="46" rx="4"/><rect x="640" y="150" width="110" height="58" rx="4"/><rect x="790" y="150" width="90" height="58" rx="4"/>
+<path d="M150 110H210" marker-end="url(#ab)"/><path d="M360 100C395 100 395 43 430 43" marker-end="url(#ab)"/><path d="M360 110H430" marker-end="url(#ab)"/><path d="M360 120C395 120 395 179 430 179" marker-end="url(#ab)"/><path d="M570 179H640" marker-end="url(#ab)"/><path d="M750 179H790" marker-end="url(#ab)"/>
+<path d="M500 20C500 -6 85 -6 85 80" stroke-dasharray="4 3" marker-end="url(#ab)"/>
+</g>
+<g font-size="12" fill="currentColor" text-anchor="middle">
+<text x="85" y="104" font-weight="600">Generator</text><text x="85" y="121" font-size="11">writes a step</text>
+<text x="285" y="104" font-weight="600">Python checker</text><text x="285" y="121" font-size="11">code model, K programs</text>
+<text x="500" y="40" font-weight="600" fill="#1b7f79">verified 39–55%</text><text x="500" y="56" font-size="11">keep</text>
+<text x="500" y="108" font-weight="600" fill="#a24a3c">refuted 27–31%</text><text x="500" y="124" font-size="11">prune / flag wrong</text>
+<text x="500" y="176" font-weight="600">unknown 13–34%</text><text x="500" y="192" font-size="11">route</text>
+<text x="695" y="174" font-weight="600">Router</text><text x="695" y="191" font-size="11">probe: AUC .63–.75</text>
+<text x="835" y="174" font-weight="600">Lean</text><text x="835" y="191" font-size="11">2× yield</text>
+<text x="290" y="12" font-size="11">correct and refutation-free trajectories → SFT with per-step verifier tags</text>
+</g></svg></div>
+<figcaption>Every step gets a cheap Python check. Refutation is the new signal: it prunes wrong steps in search and filters training trajectories. Only steps Python cannot decide are considered for Lean, and a probe on the formalizer's state picks which ones.</figcaption></figure>
+<h2>2. The weak verifier: refutation is the signal Lean lacks</h2>
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 900 330" role="img" aria-label="Grouped bars: for steps that occur only in correct solutions versus only in wrong solutions, the Python refuted rate is 7 to 11 percent versus 32 to 45 percent, and the Lean proved rate 39 to 43 percent versus 9 to 23 percent. A side panel shows oracle trajectory picks: fewest refutations plus 9.5 points versus Lean rate plus 5.5.">
+<g font-size="12" fill="currentColor" font-weight="600"><text x="280" y="24" text-anchor="middle">Verdict rates by where the step occurs</text><text x="730" y="24" text-anchor="middle">Oracle trajectory pick, 150 MATH-train trees</text></g>
+<!-- left: 4 groups (MATH-train correct, MATH-train wrong, hard correct, hard wrong); 3 bars each: python verified, python refuted, Lean proved; scale 0..0.7 over y 250..60 (271px/1.0) -->
+<g stroke="currentColor" opacity=".3"><line x1="40" y1="250" x2="520" y2="250"/></g>
+<g font-size="10.5" fill="currentColor" opacity=".8" text-anchor="end"><text x="36" y="254">0</text><text x="36" y="173">.30</text><text x="36" y="92">.60</text></g>
+<!-- values v: y=250-v*271 -->
+<!-- MATH-train correct: .652 .109 .429 -->
+<rect x="60" y="73.3" width="26" height="176.7" fill="#1b7f79"/><rect x="90" y="220.5" width="26" height="29.5" fill="#a24a3c"/><rect x="120" y="133.7" width="26" height="116.3" fill="#1f4e79" opacity=".7"/>
+<!-- MATH-train wrong: .319 .316 .232 -->
+<rect x="180" y="163.6" width="26" height="86.4" fill="#1b7f79"/><rect x="210" y="164.4" width="26" height="85.6" fill="#a24a3c"/><rect x="240" y="187.1" width="26" height="62.9" fill="#1f4e79" opacity=".7"/>
+<!-- hard correct: .695 .065 .390 -->
+<rect x="300" y="61.7" width="26" height="188.3" fill="#1b7f79"/><rect x="330" y="232.4" width="26" height="17.6" fill="#a24a3c"/><rect x="360" y="144.3" width="26" height="105.7" fill="#1f4e79" opacity=".7"/>
+<!-- hard wrong: .145 .450 .093 -->
+<rect x="420" y="210.7" width="26" height="39.3" fill="#1b7f79"/><rect x="450" y="128.1" width="26" height="121.9" fill="#a24a3c"/><rect x="480" y="224.8" width="26" height="25.2" fill="#1f4e79" opacity=".7"/>
+<g font-size="10.5" fill="currentColor" text-anchor="middle">
+<text x="103" y="268">MATH-train</text><text x="103" y="282">only correct (945)</text>
+<text x="223" y="268">MATH-train</text><text x="223" y="282">only wrong (4,114)</text>
+<text x="343" y="268">hard</text><text x="343" y="282">only correct (154)</text>
+<text x="463" y="268">hard</text><text x="463" y="282">only wrong (1,562)</text>
+</g>
+<g font-size="11" fill="currentColor"><rect x="60" y="300" width="12" height="12" fill="#1b7f79"/><text x="78" y="310">Python verified</text><rect x="190" y="300" width="12" height="12" fill="#a24a3c"/><text x="208" y="310">Python refuted</text><rect x="320" y="300" width="12" height="12" fill="#1f4e79" opacity=".7"/><text x="338" y="310">Lean proved</text></g>
+<!-- right: oracle pick gains with CI; x scale -0.02..0.16 over x 600..860 (1444px/1.0); zero at 628.9 -->
+<g stroke="currentColor" opacity=".4"><line x1="628.9" y1="50" x2="628.9" y2="250"/></g>
+<g font-size="10.5" fill="currentColor" opacity=".8" text-anchor="middle"><text x="628.9" y="266">0</text><text x="773.3" y="266">+.10</text><text x="700" y="266">+.05</text></g>
+<g font-size="11" fill="currentColor" text-anchor="end">
+<text x="592" y="84">Lean proved rate</text><text x="592" y="124">Python verified rate</text><text x="592" y="164">verified − refuted</text><text x="592" y="204">fewest refutations</text>
+</g>
+<!-- Lean: +.055 [+.005,+.107] -> x=708.3, 636.1..783.4 -->
+<line x1="636.1" y1="80" x2="783.4" y2="80" stroke="currentColor" stroke-width="1.4"/><circle cx="708.3" cy="80" r="6" fill="#7d8697"/><text x="792" y="84" font-size="10.5" fill="currentColor">+.055</text>
+<!-- py verified: +.062 [+.013,+.110] -> 718.4, 647.7..787.7 -->
+<line x1="647.7" y1="120" x2="787.7" y2="120" stroke="currentColor" stroke-width="1.4"/><circle cx="718.4" cy="120" r="6" fill="#7d8697"/><text x="796" y="124" font-size="10.5" fill="currentColor">+.062</text>
+<!-- net: +.088 [+.035,+.140] -> 756, 679.4..831 -->
+<line x1="679.4" y1="160" x2="831" y2="160" stroke="currentColor" stroke-width="1.4"/><circle cx="756" cy="160" r="6" fill="#1b7f79"/><text x="839" y="164" font-size="10.5" fill="#1b7f79">+.088</text>
+<!-- norefute: +.095 [+.040,+.148] -> 766.1, 686.7..842.7 -->
+<line x1="686.7" y1="200" x2="842.7" y2="200" stroke="currentColor" stroke-width="1.4"/><circle cx="766.1" cy="200" r="6" fill="#1b7f79"/><text x="851" y="204" font-size="10.5" fill="#1b7f79">+.095</text>
+<text x="730" y="240" font-size="10.5" fill="currentColor" opacity=".8" text-anchor="middle">gain in pick accuracy over random, 95% bootstrap CI</text>
+</svg>
+</div>
+<figcaption>Left: a Python check written by a code model separates steps of wrong solutions from steps of correct ones mainly by refuting them, which the Lean pipeline essentially never does (2.3% of its failures are refutable). Right: as a trajectory-selection score on the 150 MATH-train trees, "fewest refutations" nearly doubles the Lean rate's gain. The checker's cost is sycophancy: it verifies 22 to 31% of claims with one number altered.</figcaption>
+</figure>
+<table>
+<tr><th>weak-verifier result</th><th>number</th><th>support</th></tr>
+<tr><td>Coverage, Qwen3-30B / Qwen3-Coder-Next</td><td class="num">39 / 55% verified; 27 / 31% refuted</td><td>20,964 steps, K=4 programs each; two checkers agree exactly on 64%</td></tr>
+<tr><td>Sycophancy on number-perturbed claims</td><td class="num neg">22.5% / 31%</td><td>300 controls; conditional on the unaltered source being verified</td></tr>
+<tr><td>Python verifiability readable from the generator's own state</td><td class="num pos">AUC 0.78 (Lean: 0.70)</td><td>held-out forked trees; 0.71 on natural CoT</td></tr>
+<tr><td>External Qwen3-1.7B on Python-verified</td><td class="num pos">0.794 (Lean target: 0.753)</td><td>same data, same architecture</td></tr>
+<tr><td>Two-stage router, 10% of steps to Lean</td><td class="num">precision 0.17–0.46 vs 0.07–0.27 random</td><td>probe on Goedel's state, AUC 0.63–0.75 for "Lean proves it" among Python-unverified steps</td></tr>
+<tr><td>Routed decode, independent re-check</td><td class="num pos">+13 pts Python-verified on hard, p&lt;.0001</td><td>Coder-Next, K=4; refuted share 0.10 vs 0.22; accuracy 0.385 = control</td></tr>
+<tr><td>Trajectory rerank by real Python verdicts, replication</td><td class="num pos">+.046 [+.017, +.077] on 260 fresh hard problems</td><td>+.113 [+.046, +.183] on the MATH-500 subset; twice the Lean-rate oracle there; classifiers predicting the verdicts gain nothing</td></tr>
+<tr><td>Verifiable-CoT SFT, round 2: 491 Python-filtered trajectories</td><td class="num pos">0.782 / 0.564; tags +12 pts on hard (18/5, p=.011)</td><td>vs tag-free control 0.727 / 0.445; vs step-native beam 24/4 on hard; base model 0.845 / 0.527 (every earlier fine-tune sat below it)</td></tr>
+<tr><td>Verifiable-CoT SFT, 118 trajectories</td><td class="num pos">0.709 / 0.373 vs step-native 0.591 / 0.255</td><td>greedy, easy / hard 110; tags learned: python-tagged steps verify 1.6× more often; lean tag uninformative</td></tr>
+</table>
+
+<h2>3. Selection, search and generation with the weak verifier</h2>
+<table>
+<tr><th>experiment</th><th>result</th><th>support</th></tr>
+<tr><td>Trajectory rerank by real Python verdicts, 260 fresh hard problems</td><td class="num pos">+.046 [+.017, +.077]</td><td>+.113 [+.046, +.183] on the MATH-500 subset, twice the Lean-rate oracle; classifiers that predict the verdicts gain nothing</td></tr>
+<tr><td>Routed-verifier beam search, accuracy</td><td class="num neut">0.673 vs 0.655 easy; 0.385 vs 0.385 hard</td><td>first judge-steered arm not below the search-only control (10/8, 9/9)</td></tr>
+<tr><td>Routed-verifier beam search, verified content on hard problems</td><td class="num pos">Python-checked +13 pts (p&lt;.0001); Lean word share +5 pts (p=.032)</td><td>independent checker; refuted share 0.10 vs 0.22; solutions 43% shorter</td></tr>
+<tr><td>Verifiable-CoT SFT, round 1 (118 trajectories)</td><td class="num neut">0.645 / 0.382 tagged; 0.709 / 0.373 control</td><td>tags learned; python-tagged steps verify 1.6× more often; lean tag uninformative</td></tr>
+<tr><td>Verifiable-CoT SFT, round 2 (491 Python-filtered trajectories)</td><td class="num pos">0.782 / 0.564 tagged vs 0.727 / 0.445 control</td><td>hard: 18 wins, 5 losses, p=.011; vs step-native beam 24/4; python-tagged steps verify 2.0–2.6× more often</td></tr>
+<tr><td>Baseline to beat: un-fine-tuned Qwen2.5-7B-Instruct, greedy</td><td class="num">0.845 / 0.527</td><td>round 2 tagged matches it on hard (14/10) and is 6 points short on easy</td></tr>
+</table>
+<h2>4. Status and open experiments</h2>
+<table>
+<tr><th>item</th><th>state</th></tr>
+<tr><td>Second seed and second evaluation split for the tag effect, with the base model on both splits</td><td class="neut">running</td></tr>
+<tr><td>OpenJev as a zero-shot three-way router (Lean / Python / none) on all 20,964 labelled steps</td><td class="neut">running</td></tr>
+<tr><td>Context in verification</td><td class="pos">already the default: Lean sees previous steps as hypotheses; Python sees the problem and previous steps</td></tr>
+<tr><td>Risk: checker sycophancy</td><td class="neg">22–31% of number-perturbed claims verified</td></tr>
+<tr><td>Risk: no gain in verifiable content from SFT</td><td class="neg">verified share unchanged at 0.66 / 0.51 across all generators</td></tr>
+</table>
+<div class="note"><strong>Target.</strong> A main-track methods paper if the tag effect survives the second seed and split. If it does not, the selection result (real Python verdicts, +.046 on 260 problems) and the routed search still make a workshop paper.</div>
+</main>

@@ -1,0 +1,156 @@
+\documentclass[10pt]{article}
+\usepackage{tmlr}
+% \usepackage[accepted]{tmlr}  % camera-ready
+% \usepackage[preprint]{tmlr}  % arXiv
+\usepackage{amsmath,amssymb,booktabs,graphicx,multirow,xcolor}
+\usepackage{hyperref,url}
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+
+\title{Lean-Verified Process Rewards for Mathematical Reasoning:\\ When Formalizability Is, and Is Not, a Proxy for Correctness}
+
+\author{\name \todo{author name} \email \todo{email} \\
+      \addr \todo{affiliation}}
+% DRAFT v0 (2026-11-18). Author list, affiliations and acknowledgements to be completed.
+
+\def\month{MM}
+\def\year{YYYY}
+\def\openreview{\url{https://openreview.net/forum?id=XXXX}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Step-level reward models trained on autoformalization verdicts promise objective, unlimited supervision for mathematical reasoning: a step is rewarded if an autoformalizer can state it in Lean and a prover can close it. We test this promise end to end, checking every decoding effect against a real Lean pipeline run on freshly generated reasoning rather than against benchmark labels. Four findings emerge. (i) Judges trained on a step-verdict benchmark reach 0.80--0.86 AUC on its held-out split and 0.50--0.61 on the steps of the model actually being decoded, for every encoder, label source and internal-state probe we tried. (ii) Training on the generator's own Lean-labelled steps closes the gap, and encoder capacity decides how far the judge transfers (0.65--0.75 on five evaluation sets for a 1.7B encoder). (iii) No judge, at any strength, moves answer accuracy when it steers the search step by step, on easy or hard problems; real Lean inside the search raises the Lean-verified share of the final solution by 6 points at unchanged accuracy. (iv) Formalizability predicts correctness only on hard problems: on MATH-500 levels 1--3 the trajectory with the highest \emph{true} Lean-proved rate is correct no more often than a random one, whereas on levels 4--5 it is, and reranking complete trajectories with the learned judge gains 6.5 points of accuracy (95\% CI $[1.5, 11.3]$, 131 problems), a gain that disappears on harder problems where the generator solves only 8\%. We also show that ``not proved'' is almost never ``refuted'' (2.3\%), that the verdict of a third of all steps depends on how the step is phrased for the autoformalizer, and document three pipeline defects that silently change such measurements.
+\end{abstract}
+
+\section{Introduction}
+
+Process reward models (PRMs) score the intermediate steps of a solution and use the scores to guide or select among generations \citep{lightman2023lets,wang2024mathshepherd}. Their bottleneck is supervision: human step labels are expensive and Monte-Carlo rollouts are noisy. Autoformalization offers an appealing alternative. If a step can be translated into a formal statement \citep{wu2022autoformalization} and a prover closes it in Lean \citep{moura2021lean4,mathlib2020}, the step is verified by a proof assistant rather than by a model's opinion, and such verdicts can be produced at scale \citep{zhou2024dtv}. Benchmarks now provide step-level verdicts of this kind for tens of thousands of steps.
+
+Two assumptions are needed for this supervision to help decoding, and neither has been tested directly. The first is \emph{transfer}: a judge trained on benchmark steps must remain a good judge of the steps written by the model it is asked to guide. The second is \emph{alignment}: steps that formalize and prove must be the steps of correct solutions. This paper measures both, using a real Lean pipeline (autoformalizer, prover, and a compiled Mathlib) on about 21{,}000 freshly generated steps, so that no conclusion rests on a judge grading its own output.
+
+\paragraph{Contributions.}
+\begin{itemize}
+\item \textbf{A transfer gap.} Benchmark-trained judges, whether text classifiers or linear probes on the autoformalizer's residual stream, are near chance on the decoded model's steps (Section~\ref{sec:transfer}).
+\item \textbf{How to close it.} Forked trajectory trees give within-problem, in-generator Lean labels at 57\% of the cost of independent sampling; judges trained on 4{,}435 such labels transfer to four out-of-distribution sets, with capacity mattering more than the choice between an external classifier and an internal probe (Section~\ref{sec:ingen}).
+\item \textbf{A decoding null with a mechanism.} Across step rerank, classifier-guided beam search, an intervention-strength sweep, internal-probe judges and Lean in the loop, accuracy stays within noise of the search-only control; formalization gains order by judge AUC (Section~\ref{sec:decoding}).
+\item \textbf{Where formalizability means correctness.} An oracle analysis shows the coupling exists only on hard problems, and a replication on 260 fresh problems delimits the regime in which trajectory reranking pays (Section~\ref{sec:coupling}).
+\item \textbf{What ``proved'' measures}, and three measurement defects (step caps, problem-in-view rendering, a statement parser that dropped binders) that changed our own numbers by 4 to 25 points before correction (Section~\ref{sec:metric}).
+\end{itemize}
+
+\section{Related work}
+
+\paragraph{Process supervision.} PRMs trained on human labels \citep{lightman2023lets} or rollouts \citep{wang2024mathshepherd} are typically evaluated by reranking on the distribution they were trained for; ProcessBench \citep{zheng2024processbench} evaluates error localization. Self-consistency \citep{wang2023selfconsistency} is the standard reward-free baseline.
+\paragraph{Formal verification of informal reasoning.} Autoformalization \citep{wu2022autoformalization}, proof sketching \citep{jiang2023dsp} and verification of quantitative reasoning by formalization \citep{zhou2024dtv} use provers as checkers of whole solutions. We use the same tools \citep{lin2025goedel,ren2025deepseekproverv2,wang2025kimina,gao2024herald} at the level of single steps and ask whether the resulting signal helps decoding.
+\paragraph{Probing.} Linear probes on attention heads and residual streams read properties such as truthfulness \citep{li2023iti}; we test whether a probe on the autoformalizer predicts its own downstream verdict on unseen generators.
+
+\section{Setup}\label{sec:setup}
+
+\paragraph{Benchmark labels.} FaithformBench \citep{faithformbench} decomposes ProcessBench traces into steps, perturbs each step, autoformalizes true and perturbed steps with four dedicated autoformalizers and four LLM judges, and records a prover verdict per (step, model): 27{,}816 step variants over 1{,}179 problems. We fit judges on a problem-level 20\% split, excluding the 46 problems that overlap MATH-500.
+
+\paragraph{Real-Lean pipeline.} For a step $s$ with history $h$ of problem $q$, Goedel-Formalizer-V2 writes a Lean~4 statement, DeepSeek-Prover-V2 samples 8 tactic proofs, each proof body is spliced onto the \emph{original} statement and compiled against Mathlib (60\,s, 400{,}000 heartbeats). A step is \emph{proved} if any candidate compiles without \texttt{sorry}. The claim given to the formalizer lists the previous steps as numbered hypotheses and the step as the statement to formalize, \emph{without} the problem text (Section~\ref{sec:metric} explains why).
+
+\paragraph{Generators and problems.} Decoding experiments use Qwen2.5-7B-Instruct \citep{qwen25} fine-tuned with LoRA \citep{hu2022lora} on 226 solutions to emit explicit step boundaries (``step-native''); early experiments also use Phi-3.5-mini. Problems are the level-stratified 250-problem MATH-500 subsample of MATH \citep{hendrycks2021math}: the first 110 (levels 1--3, ``easy'') and 110 of the 131 level-4/5 problems (``hard''). Training data for in-generator judges comes from MATH \emph{train}.
+
+\paragraph{Judges.} External classifiers encode the rendered state $(q,h,s)$ with MiniLM-L6 \citep{wang2020minilm} or a fine-tuned Qwen3-1.7B (last-token pooling) and are trained with binary cross-entropy. Internal judges are logistic-regression probes on Goedel-Formalizer's residual stream or on selected attention heads \citep{li2023iti}, read from the formalization prompt before any Lean is generated.
+
+\paragraph{Decoders.} (a) \emph{Step rerank}: sample 4 candidate steps, keep the judge's top one. (b) \emph{Constrained beam search}: beam 4, 2 expansions per beam; each completed step adds $\alpha\, f_\phi(s)$ to the beam score, with $f_\phi$ the temperature-calibrated judge logit, averaged over the beam's steps. (c) \emph{Hybrid}: as (b), but steps with judge probability below 0.25 are sent to the real pipeline and pruned if unproved, within a budget of 24 Lean calls per problem. (d) \emph{Trajectory rerank}: pick, among complete solutions to a problem, the one with the highest mean step probability.
+
+\paragraph{Measures.} Accuracy uses a checker with balanced-brace answer extraction and symbolic equivalence. Real formalization of a solution is reported as the proved \emph{step rate} and as the \emph{word share} (words in proved steps over all words), which is robust to a judge that splits steps finer. Arms are compared per problem with sign and Wilcoxon tests; selection gains use 5{,}000-sample bootstraps over problems.
+
+\section{Benchmark-trained judges do not transfer}\label{sec:transfer}
+
+On the benchmark's held-out split the verifiability classifiers reach AUC 0.798 (MiniLM, identical for a 150M encoder) and 0.863 (Qwen3-1.7B). Scored against real Lean on 1{,}586 steps written by the decoded model, ten classifiers spanning both encoders and seven label sources reach 0.50--0.61, including checkpoints trained only on the verdicts of the very formalizer used by the pipeline, which rules out label mismatch as the cause. Probes on the formalizer's residual stream, which reach 0.72--0.80 on the benchmark, score 0.58--0.64 on our steps in the benchmark's own prompt format and fall to chance under the prompt our pipeline uses. The one benchmark-derived artefact that transfers is \emph{which attention heads to read}: a probe on four benchmark-selected heads reaches 0.70 and 0.76 on easy and hard in-generator steps without further training.
+
+The failure is visible in decoding. Reranking steps with the stronger benchmark classifier leaves accuracy unchanged and \emph{lowers} the real formalization rate relative to the weaker one (Qwen2.5-7B: 0.405 vs.\ 0.434; greedy 0.433). Within a problem, the benchmark classifiers' scores correlate negatively with the true proved rate ($\rho=-0.15$ to $-0.18$) while correlating positively across problems: they separate easy problems from hard ones, not good steps from bad ones.
+
+\section{In-generator labels and capacity close the gap}\label{sec:ingen}
+
+\paragraph{Forked trajectory trees.} For each of 150 MATH-train problems we sample one solution, then three more by forking a previously sampled trajectory at a uniformly chosen step and resampling from there. Shared prefixes are verified once, so 9{,}460 steps reduce to 5{,}415 Lean calls (43\% saved), and each fork yields a sibling pair of alternative steps behind an identical prefix. 27.6\% of the steps prove.
+
+\paragraph{Results.} Table~\ref{tab:auc} reports step AUC against real Lean on five sets, none used for fitting. With MiniLM the in-generator classifier is better in distribution (0.69) but not out of it. With the 1.7B encoder it reaches 0.75 in distribution and 0.65--0.74 elsewhere, including natural, retro-segmented chain-of-thought from the un-fine-tuned model. A multi-layer residual probe on the formalizer and a probe on 64 benchmark-selected heads, refit on the same labels, match it within 0.02 on step-native data and trail it on natural chain-of-thought. Pairwise, listwise and trajectory-level ranking losses did not improve on cross-entropy at this data size.
+
+\begin{table}[t]
+\caption{Step AUC against real Lean. ``Bench.'' judges are trained on FaithformBench; the others on 4{,}435 in-generator labels from MATH-train trees. Evaluation sets are disjoint from all training problems.}\label{tab:auc}
+\centering\small
+\begin{tabular}{lccccc}
+\toprule
+Judge & Held-out trees & Easy beam & Hard beam & Hard trees & Natural CoT\\
+ & (980) & (2{,}547) & (5{,}097) & (3{,}786) & (1{,}556)\\
+\midrule
+Bench.\ classifier (MiniLM) & 0.599 & 0.642 & 0.553 & 0.651 & 0.599\\
+Bench.\ residual probe & 0.638 & 0.644 & 0.580 & 0.614 & 0.582\\
+In-gen.\ MiniLM & 0.692 & 0.631 & -- & 0.695 & 0.572\\
+In-gen.\ Qwen3-1.7B & \textbf{0.753} & \textbf{0.720} & \textbf{0.709} & 0.742 & \textbf{0.654}\\
+In-gen.\ residual probe & 0.699 & 0.707 & 0.692 & \textbf{0.778} & 0.583\\
+In-gen.\ head probe (64 heads) & 0.707 & 0.697 & 0.686 & 0.771 & 0.586\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Step-level steering does not move accuracy}\label{sec:decoding}
+
+Table~\ref{tab:decode} collects the beam experiments. Beam search itself is worth $+6$ points over greedy on easy problems and $+13$ on hard ones. No judge adds to that. Raising the intervention strength makes the judge change more final answers (80\% of problems at $\alpha=1$, 98\% at $\alpha=30$) and lowers accuracy by 7--10 points while formalization stays where $\alpha=1$ left it. On hard problems the three judges' gains in proved word share ($+4.4$, $+3.7$, $+2.6$ points) order exactly by their AUC on hard steps (0.709, 0.692, 0.686): what a step-level judge buys is a property of how well it ranks steps, not of where it reads them from.
+
+Real Lean inside the search is the one intervention with a significant effect on easy problems: proved word share rises from 0.522 to 0.580 ($p=0.004$) and is also above the judge-only arm ($p=0.04$), with accuracy identical to the control (11 wins, 11 losses) at about 11 Lean calls per problem. A first version that trusted unsure steps once the budget was spent let the search run to 34-step solutions on the hardest problems; falling back to the judge's score removes this.
+
+\begin{table}[t]
+\caption{Constrained beam search (beam 4, expansion 2) with the step-native generator, 110 problems per set, paired against the search-only control. W/L: problems where the arm is correct and the control wrong, and vice versa. $p$: Wilcoxon signed-rank on per-problem word share.}\label{tab:decode}
+\centering\small
+\begin{tabular}{llcccc}
+\toprule
+Set & Arm & Accuracy & W/L & Word share & $p$\\
+\midrule
+Easy & search only & 0.655 & -- & 0.522 & --\\
+ & in-gen.\ MiniLM judge & 0.673 & 9/7 & 0.534 & 0.54\\
+ & in-gen.\ Qwen3 judge, $\alpha=1$ & 0.627 & 8/11 & 0.543 & 0.22\\
+ & \quad $\alpha=4$ / $10$ / $30$ & 0.564 / 0.582 / 0.555 & 8/18, 14/22, 13/24 & 0.544 / 0.531 / -- & n.s.\\
+ & residual-probe judge & 0.600 & 9/15 & 0.514 & 0.68\\
+ & head-probe judge & 0.627 & 7/10 & 0.518 & 0.91\\
+ & hybrid, Lean in the loop & 0.655 & 11/11 & \textbf{0.580} & \textbf{0.004}\\
+\midrule
+Hard & search only & 0.382 & -- & 0.342 & --\\
+ & in-gen.\ Qwen3 judge & 0.373 & 7/8 & \textbf{0.386} & \textbf{0.018}\\
+ & residual-probe judge & 0.364 & 6/8 & 0.379 & 0.083\\
+ & head-probe judge & 0.355 & 9/12 & 0.368 & 0.17\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Formalizability predicts correctness only on hard problems}\label{sec:coupling}
+
+\paragraph{An oracle analysis.} Suppose the judge were perfect. For each problem with several complete trajectories, pick the one with the highest \emph{true} proved step rate. On 15 easy MATH-500 problems with 10 natural trajectories each this oracle is correct 0.733 of the time, against 0.753 for a random pick: even perfect knowledge of provability would not help. On hard problems it does: 0.386 vs.\ 0.318 on the 150 MATH-train trees (within-problem $\rho=+0.25$) and 0.367 vs.\ 0.308 on 60 MATH-500 level-4/5 problems ($\rho=+0.35$). A replication on the 71 remaining MATH-500 level-4/5 problems, with all 3{,}486 steps labelled, gives 0.254 vs.\ 0.197 ($\rho=+0.20$); pooled over the 131 problems the oracle gain is $+0.057$ (95\% CI $[+0.010,+0.107]$).
+
+\paragraph{The learned judge.} On the first 60 hard problems, trajectory rerank with the Qwen3 judge raises accuracy from 0.308 to 0.383 ($+0.075$, CI $[+0.013,+0.138]$); the MiniLM judge and the benchmark classifier do not ($+0.025$, $-0.025$). On the fresh 71 the gain is $+0.056$ ($[-0.011,+0.127]$), and pooled over 131 problems $+0.065$ ($[+0.015,+0.113]$).
+
+\paragraph{The limit of the regime.} We also sampled 189 level-4/5 problems from the MATH test split outside MATH-500, on which the generator solves only 7.9\% of trajectories (19.7\% on MATH-500's hard problems). There the judge's gain is absent ($-0.016$, CI $[-0.044,+0.012]$): four problems in five have no correct trajectory to select. The claim supported by our data is therefore conditional: reranking complete solutions with an in-generator Lean judge gains accuracy on problems hard enough for provability to track correctness but easy enough for the generator to solve a fifth of the time.
+
+\paragraph{Trajectory-level versus step-level.} The same judge that selects correct complete trajectories on hard problems does not help when steering the beam step by step (Table~\ref{tab:decode}). The trajectory-level decision compares four finished solutions; the step-level one compares eight partial continuations that share most of their prefix. Interestingly, on the replication set the judge's pick gains accuracy while its gain in \emph{true} Lean rate is only $+0.011$, so the part of its score that tracks correctness on hard problems is not mainly Lean provability.
+
+\section{What ``proved'' measures, and how to measure it}\label{sec:metric}
+
+\paragraph{Not proved is not refuted.} We asked the prover to prove the negation of 300 statements whose proof had failed, and of 90 proved controls. It refuted 7 of the 300 (2.3\%) and none of the controls; 196 of the failures are closed numeric claims, the easiest to refute when false. The metric is best read as \emph{provable by this pipeline}.
+
+\paragraph{Rendering.} With the problem text in view, the formalizer returns the problem or its answer for about a third of the steps (33--38\% of steps share a verbatim Lean conclusion with another step of the same problem). Presenting only the previous steps as hypotheses yields step-level statements; re-labelling 1{,}586 steps this way changes 33\% of the verdicts.
+
+\paragraph{Three defects worth checking for.} (1) A cap on the number of steps silently produced empty answers for 19--52\% of trajectories, unevenly across arms; uncapped, greedy accuracy of Qwen2.5-7B rose from 0.36 to 0.66. (2) A statement parser that required a colon directly after the theorem name rejected every statement with binders, 10--17\% of all steps; 40.5\% of the 607 affected steps prove once parsed. (3) Answers with nested \LaTeX{} braces were graded wrong. None of the corrections changed an ordering between arms, but each changed absolute rates by more than the effects under study.
+
+\section{Limitations}
+
+Samples are small (110 problems per decoding arm, 131 for the hard-problem reranking), so accuracy nulls bound effects at roughly $\pm 8$ points. All late experiments use one step-native generator, whose fine-tuning on 226 solutions cost accuracy relative to the un-fine-tuned model (0.59 vs.\ 0.85 greedy on the easy set); the decoding results hold for a generator that is weaker than its base. Only MATH is studied. The pipeline uses one formalizer and one prover with 8 samples; verdicts would rise with a larger search. The grader may undercount correct answers phrased as sentences, equally for all arms.
+
+\section{Conclusion}
+
+Autoformalization verdicts are a usable training signal for step judges only on the distribution of the model being decoded, and a judge that ranks steps well still does not make step-by-step search more accurate. Formalizability and correctness are distinct on easy problems and coupled on hard ones, where selecting among complete solutions is the effective and cheap operation. For work that reports formalization-based rewards, we recommend measuring the judge on the decoded model's own steps, reporting an oracle that uses the true verdicts, and checking the three measurement defects above.
+
+\subsubsection*{Broader Impact Statement}
+\todo{Add if applicable.}
+
+\bibliography{refs}
+\bibliographystyle{tmlr}
+
+\appendix
+\section{Appendix outline}
+\todo{(A) Full label-source and encoder grid for Section~\ref{sec:transfer}. (B) Forked-tree sampling details, ranking-loss results. (C) Per-level breakdowns of Table~\ref{tab:decode}; intervention-strength sweep. (D) Probe layer sweeps and head selection. (E) Pipeline prompts, prover settings, binder re-run table. (F) Compute: about 600 GPU-hours on H200 cards.}
+
+\end{document}
