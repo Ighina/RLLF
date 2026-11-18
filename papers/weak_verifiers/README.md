@@ -26,3 +26,8 @@ each step with the verifier that applies, which helps accuracy on hard problems.
 - Context in verification is already the default: Lean gets previous steps as hypotheses (no problem text); Python gets
   the problem, the previous steps and the claim.
 - Baseline for every SFT claim is the un-fine-tuned Qwen2.5-7B-Instruct (0.845 easy / 0.527 hard greedy).
+
+## Third verifier (§13.12)
+- Jev with evidence on HotpotQA: rerank EM 0.620 vs self-consistency 0.577 (18/5, p = 0.011). First setting where a verifier beats voting.
+- On math steps Jev's yes-probability beats Python checks as a correctness signal (AUC 0.884 vs 0.791); voting still wins on MATH.
+- Direction: evidence-grounded and mixed-mode tasks (FinQA / TAT-QA); see `next_steps_benchmark_creation.md`.

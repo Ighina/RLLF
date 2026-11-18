@@ -89,6 +89,7 @@ selection moves it by +6–8 points with CIs excluding zero.
 | Is the base model's lead over the SFT generators memorisation of MATH? | No: on fresh FinChain instances the base model leads 0.75 vs 0.55–0.59, as on MATH-500; also on AIME 2026, Omni-MATH, GSM8K and code. | FT §13.9 |
 | Does the verifier help the base model's own solutions? | As a reranker it beats a random sample by +9 pts on hard problems (0.745 vs 0.653) but not self-consistency (0.782); verifier-weighted voting = plain voting. | FT §13.10 |
 | Can a zero-shot decision model (OpenJev) route lean / python / none? | Its routes do not predict which verifier succeeds (AUC 0.51–0.63); following them verifies fewer steps than always-Python (0.32 vs 0.39); only its `none` route is informative. | FT §13.11 |
+| Does a third verifier (Jev, binary "supported / correct?") help? | **Yes where answers do not cluster**: on HotpotQA (300 questions, 8 samples) Jev rerank by answer verdict × min step support gives EM 0.620 / F1 0.764 vs self-consistency 0.577 / 0.718 (18/5, p = 0.011). On math steps Jev's yes-probability is a better correctness signal than Python checks (sample AUC 0.884 vs 0.791) but voting still wins on MATH. | FT §13.12 |
 
 ## D. Paper
 

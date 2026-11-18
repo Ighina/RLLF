@@ -1772,3 +1772,52 @@ prove 0.13–0.35 of the time (random 0.07–0.27) — a real but smaller lift t
 (AUC 0.60–0.72 for "neither verifier succeeds" on four of five sets). "Formalisable" as judged from the text
 and "provable by this pipeline" are different properties — which verifier works is an empirical fact about the
 checker, better learned from its verdicts than read off the step's type.
+
+### 13.12 Jev as a third verifier: evidence-grounded steps and math steps (Nov 18)
+
+The decision model `openjev/openjev` asked a **binary** question per step (probability of "yes" read at the first
+output position; `jev_verify.py`, 8.3 GPU-h with generation).
+
+**(a) Retrieval setting — HotpotQA distractor, 300 questions (seed 0).** The un-fine-tuned Qwen2.5-7B-Instruct
+answers from the ten supplied paragraphs as numbered propositions citing `[Title]`, one greedy answer and
+eight samples (T = 0.8). Jev is asked of each step *"is this step true and supported by the evidence
+documents?"* and of each final answer JevBeam's answer-level question. Answers are free-form spans: 2.1
+distinct normalised answers per question on average.
+
+| selection over the 8 samples | EM | F1 | vs self-consistency (EM W/L, p) |
+|---|---|---|---|
+| greedy | 0.557 | 0.702 | 5/11, 0.21 |
+| random sample | 0.551 | 0.696 | |
+| self-consistency (majority of normalised answers) | 0.577 | 0.718 | — |
+| SC weighted by Jev answer verdict | 0.600 | 0.752 | 7/0, **0.016** |
+| SC weighted by answer verdict × min step support | 0.603 | 0.751 | 8/0, **0.008** |
+| Jev rerank: answer verdict | 0.607 | 0.762 | 15/6, 0.078 |
+| Jev rerank: min step support | 0.593 | 0.718 | 13/8, 0.38 |
+| **Jev rerank: answer verdict × min step support** | **0.620** | **0.764** | 18/5, **0.011** |
+| oracle (any sample correct) | 0.700 | 0.800 | |
+
+As predictors of a sample's exact match: answer verdict AUC 0.753, min step support 0.631, mean step support
+0.641. **Here the verifier beats voting**: +4.3 EM and +4.6 F1 over self-consistency (p = 0.011), a third of
+the way to the oracle, and every Jev-weighted vote wins without a single loss. This is the regime §13.10
+pointed to — free-form answers, evidence to check against — and the first setting in the project where a
+step/answer verifier improves on majority voting with a significant paired test. Step-level support adds
+little on its own; combined with the answer verdict it gives the best selector.
+
+**(b) Math steps — Jev asked *"is this mathematical reasoning step correct?"***
+
+| signal | base-model MATH-500 samples → sample correct (AUC) | step-native trees: steps only in correct vs only in wrong solutions (AUC) |
+|---|---|---|
+| Jev mean step probability | **0.884** | MATH-train **0.743**, hard **0.879** |
+| Python verified − refuted (§13.1, §13.10) | 0.791 | MATH-train 0.684, hard 0.750 |
+
+Jev's per-step yes-probability is a better correctness signal than the Python checker on both data sets, at
+a fraction of the cost (one forward pass, no code generation or execution), and it tracks the other
+verifiers' verdicts (AUC 0.77 for Python-verified, 0.75 for Lean-proved). As a selector on the base model's
+eight MATH-500 samples it reaches 0.955 on easy problems (self-consistency 0.927, 4/1) but 0.736 on hard ones
+(0.782, 2/7): as with the Python verifier, on MATH with clusterable answers voting remains the stronger
+operation, and Jev-weighted voting matches it (0.945 / 0.791).
+
+Reading: the value of a step verifier depends on whether the answers cluster. Where they do (MATH), voting
+wins and verifiers add nothing; where they do not and evidence is available (HotpotQA), a decision model
+checking steps and answers against the evidence beats voting. A verifier-routing benchmark should therefore be
+built on evidence-grounded and mixed-mode tasks (FinQA / TAT-QA, multi-hop QA), not on pure mathematics.
