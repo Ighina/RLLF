@@ -1821,3 +1821,32 @@ Reading: the value of a step verifier depends on whether the answers cluster. Wh
 wins and verifiers add nothing; where they do not and evidence is available (HotpotQA), a decision model
 checking steps and answers against the evidence beats voting. A verifier-routing benchmark should therefore be
 built on evidence-grounded and mixed-mode tasks (FinQA / TAT-QA, multi-hop QA), not on pure mathematics.
+
+## 14. Framing by the theory of beam search (He et al., NeurIPS 2026) — prefix alignment and equal budget (Nov 19)
+
+"Provable Test-Time Scaling for Beam Search in LLM Reasoning" (arXiv:2609.38672) analyses likelihood-pruned beam
+search with a reward model on complete responses only: sample complexity depends on token-level coverage; best-of-N
+and majority voting depend on sequence-level coverage (exponential in horizon); the guarantee needs *prefix
+competitiveness* (the pruning score ranks the correct prefix above competitors); reward-model error is a term search
+does not reduce; process verifiers are listed as future work. Two measurements it suggests, both on existing data:
+
+**Prefix alignment at decisive forks** (sibling steps behind an identical prefix, one continuation correct, one wrong;
+fraction where the signal scores the correct-side step higher, ties one half):
+
+| signal | MATH-train trees (75) | MATH-500 hard, first 60 (27) | MATH-500 hard, fresh 71 (37) | MATH-test hard (41) |
+|---|---|---|---|---|
+| true Lean verdict | 0.520 | 0.519 | 0.500 | — |
+| Python verified − refuted | 0.533 | 0.537 | 0.486 | 0.463 |
+| Jev p(yes) | 0.593 | 0.630 | — | — |
+| Qwen3 Lean judge | 0.587 (in-sample for 120 trees) | 0.667 (18/9) | 0.351 (13/24) | 0.512 (21/20) |
+
+Pooled over the three held-out hard sets the judge prefers the correct side 52 times and the wrong side 53. **The
+verifier scores are not prefix-competitive — not even the true Lean verdict** — which explains the step-level
+steering null (§5, §8, §12) independently of judge quality: the coupling between provability and correctness (§5.4,
+§11) accumulates over a trajectory and is absent at the single step where trajectories diverge.
+
+**Equal budget, step-native generator, the 110 MATH-500 level-4/5 problems decoded by every method:** one trajectory
+0.273 (1×); majority vote over 4 forked trajectories 0.264, judge rerank 0.345, Python-verdict rerank 0.355, oracle
+0.473 (≈ 2.3× — forks share prefixes); beam search likelihood-only 0.382, with the judge 0.373, routed 0.385 (≈ 8×).
+Reranking four trajectories gets most of beam search's gain at under a third of its generation cost; voting gains
+nothing on hard problems.

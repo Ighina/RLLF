@@ -20,21 +20,23 @@
 \maketitle
 
 \begin{abstract}
-Step-level reward models trained on autoformalization verdicts promise objective, unlimited supervision for mathematical reasoning: a step is rewarded if an autoformalizer can state it in Lean and a prover can close it. We test this promise end to end, checking every decoding effect against a real Lean pipeline run on freshly generated reasoning rather than against benchmark labels. Four findings emerge. (i) Judges trained on a step-verdict benchmark reach 0.80--0.86 AUC on its held-out split and 0.50--0.61 on the steps of the model actually being decoded, for every encoder, label source and internal-state probe we tried. (ii) Training on the generator's own Lean-labelled steps closes the gap, and encoder capacity decides how far the judge transfers (0.65--0.75 on five evaluation sets for a 1.7B encoder). (iii) No judge, at any strength, moves answer accuracy when it steers the search step by step, on easy or hard problems; real Lean inside the search raises the Lean-verified share of the final solution by 6 points at unchanged accuracy. (iv) Formalizability predicts correctness only on hard problems: on MATH-500 levels 1--3 the trajectory with the highest \emph{true} Lean-proved rate is correct no more often than a random one, whereas on levels 4--5 it is, and reranking complete trajectories with the learned judge gains 6.5 points of accuracy (95\% CI $[1.5, 11.3]$, 131 problems), a gain that disappears on harder problems where the generator solves only 8\%. We also show that ``not proved'' is almost never ``refuted'' (2.3\%), that the verdict of a third of all steps depends on how the step is phrased for the autoformalizer, and document three pipeline defects that silently change such measurements.
+Step-level reward models trained on autoformalization verdicts promise objective, unlimited supervision for mathematical reasoning: a step is rewarded if an autoformalizer can state it in Lean and a prover can close it. We test this promise end to end, checking every decoding effect against a real Lean pipeline run on freshly generated reasoning rather than against benchmark labels. Four findings emerge. (i) Judges trained on a step-verdict benchmark reach 0.80--0.86 AUC on its held-out split and 0.50--0.61 on the steps of the model actually being decoded, for every encoder, label source and internal-state probe we tried. (ii) Training on the generator's own Lean-labelled steps closes the gap, and encoder capacity decides how far the judge transfers (0.65--0.75 on five evaluation sets for a 1.7B encoder). (iii) No judge, at any strength, moves answer accuracy when it steers the search step by step, on easy or hard problems; real Lean inside the search raises the Lean-verified share of the final solution by 6 points at unchanged accuracy. (iv) Formalizability predicts correctness only on hard problems: on MATH-500 levels 1--3 the trajectory with the highest \emph{true} Lean-proved rate is correct no more often than a random one, whereas on levels 4--5 it is, and reranking complete trajectories with the learned judge gains 6.5 points of accuracy (95\% CI $[1.5, 11.3]$, 131 problems), a gain that disappears on harder problems where the generator solves only 8\%. The step-level null has a direct explanation in the terms of recent theory of beam search: at the fork where a correct and an incorrect continuation part, the true Lean verdict prefers the correct step 50--52\% of the time, so the verifier's score is not prefix-competitive. We also show that ``not proved'' is almost never ``refuted'' (2.3\%), that the verdict of a third of all steps depends on how the step is phrased for the autoformalizer, and document three pipeline defects that silently change such measurements.
 \end{abstract}
 
 \section{Introduction}
 
 Process reward models (PRMs) score the intermediate steps of a solution and use the scores to guide or select among generations \citep{lightman2023lets,wang2024mathshepherd}. Their bottleneck is supervision: human step labels are expensive and Monte-Carlo rollouts are noisy. Autoformalization offers an appealing alternative. If a step can be translated into a formal statement \citep{wu2022autoformalization} and a prover closes it in Lean \citep{moura2021lean4,mathlib2020}, the step is verified by a proof assistant rather than by a model's opinion, and such verdicts can be produced at scale \citep{zhou2024dtv}. Benchmarks now provide step-level verdicts of this kind for tens of thousands of steps.
 
-Two assumptions are needed for this supervision to help decoding, and neither has been tested directly. The first is \emph{transfer}: a judge trained on benchmark steps must remain a good judge of the steps written by the model it is asked to guide. The second is \emph{alignment}: steps that formalize and prove must be the steps of correct solutions. This paper measures both, using a real Lean pipeline (autoformalizer, prover, and a compiled Mathlib) on about 21{,}000 freshly generated steps, so that no conclusion rests on a judge grading its own output.
+Recent theory makes precise when search at test time pays. \citet{he2026provable} analyse beam search that prunes by the model's own likelihood and consults a reward model only on complete responses: its sample complexity depends on a \emph{token-level coverage} coefficient (how unlikely the optimal continuation is under the base model), whereas sequence-level methods such as best-of-$N$ and majority voting depend on the product of these coefficients over the horizon. Beam search is therefore favoured on hard, long-horizon instances and sequence-level methods on easy ones, and the guarantee requires \emph{prefix competitiveness}: the pruning score must rank the correct prefix above its competitors. Their analysis leaves open the case of an external verifier consulted \emph{before} the response is complete, which is exactly what a process reward model is. This paper studies that case empirically for verifiers derived from Lean.
+
+Two assumptions are needed for this supervision to help decoding, and neither has been tested directly. The first is \emph{transfer}: a judge trained on benchmark steps must remain a good judge of the steps written by the model it is asked to guide. The second is \emph{alignment}: steps that formalize and prove must be the steps of correct solutions. In the terms above, alignment is prefix competitiveness for the verifier's score: at the point where a correct and an incorrect continuation part, the verifier must prefer the correct one. This paper measures both, using a real Lean pipeline (autoformalizer, prover, and a compiled Mathlib) on about 21{,}000 freshly generated steps, so that no conclusion rests on a judge grading its own output.
 
 \paragraph{Contributions.}
 \begin{itemize}
 \item \textbf{A transfer gap.} Benchmark-trained judges, whether text classifiers or linear probes on the autoformalizer's residual stream, are near chance on the decoded model's steps (Section~\ref{sec:transfer}).
 \item \textbf{How to close it.} Forked trajectory trees give within-problem, in-generator Lean labels at 57\% of the cost of independent sampling; judges trained on 4{,}435 such labels transfer to four out-of-distribution sets, with capacity mattering more than the choice between an external classifier and an internal probe (Section~\ref{sec:ingen}).
 \item \textbf{A decoding null with a mechanism.} Across step rerank, classifier-guided beam search, an intervention-strength sweep, internal-probe judges and Lean in the loop, accuracy stays within noise of the search-only control; formalization gains order by judge AUC (Section~\ref{sec:decoding}).
-\item \textbf{Where formalizability means correctness.} An oracle analysis shows the coupling exists only on hard problems, and a replication on 260 fresh problems delimits the regime in which trajectory reranking pays (Section~\ref{sec:coupling}).
+\item \textbf{Where formalizability means correctness, and why steering fails.} An oracle analysis shows the coupling exists only on hard problems and only at the level of whole trajectories: at the step where a correct and an incorrect continuation diverge, even the true Lean verdict prefers the correct one no more often than chance. A replication on 260 fresh problems delimits the regime in which trajectory reranking pays (Section~\ref{sec:coupling}).
 \item \textbf{What ``proved'' measures}, and three measurement defects (step caps, problem-in-view rendering, a statement parser that dropped binders) that changed our own numbers by 4 to 25 points before correction (Section~\ref{sec:metric}).
 \end{itemize}
 
@@ -42,6 +44,8 @@ Two assumptions are needed for this supervision to help decoding, and neither ha
 
 \paragraph{Process supervision.} PRMs trained on human labels \citep{lightman2023lets} or rollouts \citep{wang2024mathshepherd} are typically evaluated by reranking on the distribution they were trained for; ProcessBench \citep{zheng2024processbench} evaluates error localization. Self-consistency \citep{wang2023selfconsistency} is the standard reward-free baseline.
 \paragraph{Formal verification of informal reasoning.} Autoformalization \citep{wu2022autoformalization}, proof sketching \citep{jiang2023dsp} and verification of quantitative reasoning by formalization \citep{zhou2024dtv} use provers as checkers of whole solutions. We use the same tools \citep{lin2025goedel,ren2025deepseekproverv2,wang2025kimina,gao2024herald} at the level of single steps and ask whether the resulting signal helps decoding.
+\paragraph{Theory of test-time search.} \citet{snell2024scaling} observe empirically that the best test-time strategy depends on problem difficulty. \citet{he2026provable} prove a version of this for likelihood-pruned beam search against best-of-$N$ and majority voting, show that reward-model error enters as a term that more search does not reduce, and list process verifiers as future work. Our results are an empirical study of that open case: the difficulty dependence they predict for search appears in our data (Section~\ref{sec:decoding}), and their prefix-competitiveness condition, measured for verifier scores, explains why step-level verifier guidance fails (Section~\ref{sec:coupling}).
+
 \paragraph{Probing.} Linear probes on attention heads and residual streams read properties such as truthfulness \citep{li2023iti}; we test whether a probe on the autoformalizer predicts its own downstream verdict on unseen generators.
 
 \section{Setup}\label{sec:setup}
@@ -90,7 +94,7 @@ In-gen.\ head probe (64 heads) & 0.707 & 0.697 & 0.686 & 0.771 & 0.586\\
 
 \section{Step-level steering does not move accuracy}\label{sec:decoding}
 
-Table~\ref{tab:decode} collects the beam experiments. Beam search itself is worth $+6$ points over greedy on easy problems and $+13$ on hard ones. No judge adds to that. Raising the intervention strength makes the judge change more final answers (80\% of problems at $\alpha=1$, 98\% at $\alpha=30$) and lowers accuracy by 7--10 points while formalization stays where $\alpha=1$ left it. On hard problems the three judges' gains in proved word share ($+4.4$, $+3.7$, $+2.6$ points) order exactly by their AUC on hard steps (0.709, 0.692, 0.686): what a step-level judge buys is a property of how well it ranks steps, not of where it reads them from.
+Table~\ref{tab:decode} collects the beam experiments. Beam search itself is worth $+6$ points over greedy on easy problems and $+13$ on hard ones, the direction \citet{he2026provable} predict: search that prunes by likelihood helps most where the base model is least likely to produce the correct continuation. No judge adds to that. Raising the intervention strength makes the judge change more final answers (80\% of problems at $\alpha=1$, 98\% at $\alpha=30$) and lowers accuracy by 7--10 points while formalization stays where $\alpha=1$ left it. On hard problems the three judges' gains in proved word share ($+4.4$, $+3.7$, $+2.6$ points) order exactly by their AUC on hard steps (0.709, 0.692, 0.686): what a step-level judge buys is a property of how well it ranks steps, not of where it reads them from.
 
 Real Lean inside the search is the one intervention with a significant effect on easy problems: proved word share rises from 0.522 to 0.580 ($p=0.004$) and is also above the judge-only arm ($p=0.04$), with accuracy identical to the control (11 wins, 11 losses) at about 11 Lean calls per problem. A first version that trusted unsure steps once the budget was spent let the search run to 34-step solutions on the hardest problems; falling back to the judge's score removes this.
 
@@ -125,6 +129,41 @@ Hard & search only & 0.382 & -- & 0.342 & --\\
 
 \paragraph{The limit of the regime.} We also sampled 189 level-4/5 problems from the MATH test split outside MATH-500, on which the generator solves only 7.9\% of trajectories (19.7\% on MATH-500's hard problems). There the judge's gain is absent ($-0.016$, CI $[-0.044,+0.012]$): four problems in five have no correct trajectory to select. The claim supported by our data is therefore conditional: reranking complete solutions with an in-generator Lean judge gains accuracy on problems hard enough for provability to track correctness but easy enough for the generator to solve a fifth of the time.
 
+\paragraph{Prefix alignment: why step-level guidance fails.} The forked trees let us measure prefix competitiveness for verifier scores directly. A \emph{decisive fork} is a pair of alternative steps behind an identical prefix whose two continuations end one correct and one incorrect. Table~\ref{tab:align} reports how often each signal scores the correct-side step higher. The true Lean verdict is at chance on every set (0.50--0.52), as is the learned judge on held-out hard problems (52 preferences for the correct side against 53, pooled over 105 forks). At the moment the search must choose, provability does not distinguish the branch that will succeed; the coupling of Section~\ref{sec:coupling} is a property of whole trajectories, where it accumulates over many steps, not of the single step at which they diverge. This is the condition \citet{he2026provable} show to be necessary for beam search, failing for the verifier's score, and it accounts for the null of Section~\ref{sec:decoding} without appeal to judge quality: an oracle judge would fail the same way.
+
+\begin{table}[t]
+\caption{Prefix alignment at decisive forks: fraction of sibling-step pairs (identical prefix, one continuation correct, one incorrect) in which the signal scores the correct-side step higher; ties count one half. The judge was trained on 120 of the 150 MATH-train trees; the other sets are held out.}\label{tab:align}
+\centering\small
+\begin{tabular}{lcccc}
+\toprule
+Signal & MATH-train trees & MATH-500 hard & MATH-500 hard, fresh & MATH-test hard\\
+ & (75 forks) & (27) & (37) & (41)\\
+\midrule
+True Lean verdict & 0.520 & 0.519 & 0.500 & --\\
+In-gen.\ Qwen3 judge & 0.587 & 0.667 & 0.351 & 0.512\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Equal budget.} Table~\ref{tab:budget} places the methods on a common generation budget for the MATH-500 level-4/5 problems. Reranking four forked trajectories with the judge recovers most of the gain of beam search at under a third of its generation cost, while majority voting over the same four trajectories gains nothing: on hard problems wrong answers rarely agree. This is the regime in which sequence-level voting is predicted to be weak and selection by a reward signal to be useful.
+
+\begin{table}[t]
+\caption{Accuracy against nominal generation budget, step-native generator, on the 110 MATH-500 level-4/5 problems decoded by every method. Budget is in single-trajectory equivalents; the four forked trajectories share prefixes (about 2.3 equivalents) and are therefore not independent samples.}\label{tab:budget}
+\centering\small
+\begin{tabular}{llc}
+\toprule
+Method & Budget & Accuracy\\
+\midrule
+One trajectory & $1\times$ & 0.273\\
+Majority vote over 4 forked trajectories & $\approx 2.3\times$ & 0.264\\
+Judge rerank over 4 & $\approx 2.3\times$ & 0.345\\
+Oracle over 4 & $\approx 2.3\times$ & 0.473\\
+Beam search, likelihood only (4$\times$2) & $\approx 8\times$ & 0.382\\
+Beam search with the judge & $\approx 8\times$ & 0.373\\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \paragraph{Trajectory-level versus step-level.} The same judge that selects correct complete trajectories on hard problems does not help when steering the beam step by step (Table~\ref{tab:decode}). The trajectory-level decision compares four finished solutions; the step-level one compares eight partial continuations that share most of their prefix. Interestingly, on the replication set the judge's pick gains accuracy while its gain in \emph{true} Lean rate is only $+0.011$, so the part of its score that tracks correctness on hard problems is not mainly Lean provability.
 
 \section{What ``proved'' measures, and how to measure it}\label{sec:metric}
@@ -141,7 +180,7 @@ Samples are small (110 problems per decoding arm, 131 for the hard-problem reran
 
 \section{Conclusion}
 
-Autoformalization verdicts are a usable training signal for step judges only on the distribution of the model being decoded, and a judge that ranks steps well still does not make step-by-step search more accurate. Formalizability and correctness are distinct on easy problems and coupled on hard ones, where selecting among complete solutions is the effective and cheap operation. For work that reports formalization-based rewards, we recommend measuring the judge on the decoded model's own steps, reporting an oracle that uses the true verdicts, and checking the three measurement defects above.
+Autoformalization verdicts are a usable training signal for step judges only on the distribution of the model being decoded, and a judge that ranks steps well still does not make step-by-step search more accurate, because provability does not separate a correct continuation from an incorrect one at the step where they diverge. Formalizability and correctness are distinct on easy problems and coupled on hard ones, where selecting among complete solutions is the effective and cheap operation. For work that reports formalization-based rewards, we recommend measuring the judge on the decoded model's own steps, reporting an oracle that uses the true verdicts, measuring prefix alignment at decisive forks before spending compute on verifier-guided search, comparing methods at equal generation budget, and checking the three measurement defects above.
 
 \subsubsection*{Broader Impact Statement}
 \todo{Add if applicable.}
